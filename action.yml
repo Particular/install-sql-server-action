@@ -22,7 +22,7 @@ runs:
         # Set necessary SQLCMD environment variable for the setup step
         echo "SQLCMDSERVER=.\SQLEXPRESS" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
         # Set connection string as environment variable for the tests
-        echo "${{ input.connection-string-env-var }}=Data Source=.\SQLEXPRESS;Initial Catalog=${{ input.catalog }};Integrated Security=True;${{ input.extra-params }}" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
+        echo "${{ inputs.connection-string-env-var }}=Data Source=.\SQLEXPRESS;Initial Catalog=${{ inputs.catalog }};Integrated Security=True;${{ inputs.extra-params }}" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
     - name: Start SQL Server (Linux)
       if: runner.os == 'Linux'              
       shell: bash         
@@ -36,4 +36,4 @@ runs:
         echo "SQLCMDUSER=sa" >> $GITHUB_ENV
         echo "SQLCMDSERVER=localhost,1433" >> $GITHUB_ENV
         # Set connection string as environment variable for the tests
-        echo "${{ input.connection-string-env-var }}=Server=localhost;Database=${{ input.catalog }};User Id=sa;Password=$sa_pw;${{ input.extra-params }}" >> $GITHUB_ENV  
+        echo "${{ inputs.connection-string-env-var }}=Server=localhost;Database=${{ inputs.catalog }};User Id=sa;Password=$sa_pw;${{ inputs.extra-params }}" >> $GITHUB_ENV  
