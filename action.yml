@@ -43,11 +43,11 @@ runs:
         for ($i = 1; $i -le 30; $i++) {
           try {
             echo "Attempt $i/30 to connect to SQL Server..."
-            sqlcmd -Q "SELECT @@SERVERNAME"
+            $result = sqlcmd -Q "SELECT @@SERVERNAME as ServerName"
             break
           } catch {
             Start-Sleep -seconds 1
           }
         }
 
-        sqlcmd -Q "CREATE DATABASE ${{ inputs.catalog }}"
+        sqlcmd -Q "CREATE DATABASE [${{ inputs.catalog }}]"
