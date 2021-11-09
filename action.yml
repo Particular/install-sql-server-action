@@ -37,3 +37,17 @@ runs:
         echo "SQLCMDSERVER=localhost,1433" >> $GITHUB_ENV
         # Set connection string as environment variable for the tests
         echo "${{ inputs.connection-string-env-var }}=Server=localhost;Database=${{ inputs.catalog }};User Id=sa;Password=$sa_pw;${{ inputs.extra-params }}" >> $GITHUB_ENV  
+    - name: Setup server
+      shell: pwsh
+      run: |
+        for ($i = 1; $i -le 30; $i++) {
+          try {
+            echo "Attempt $i/30 to connect to SQL Server..."
+            sqlcmd -Q "SELECT @@SERVERNAME"
+            break
+          } catch {
+            Start-Sleep -seconds 1
+          }
+        }
+
+        sqlcmd -Q "CREATE DATABASE ${{ inputs.catalog }}"
