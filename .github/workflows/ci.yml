@@ -1,0 +1,35 @@
+name: CI
+on:
+  pull_request:
+    paths-ignore:
+      - '**.md'
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+jobs:
+  ci:
+    runs-on: ${{ matrix. os }}
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-2019
+          - name: Linux
+            os: ubuntu-20.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2.3.4
+      - name: Run
+        uses: ./
+        with:
+          connection-string-env-var: SQL_CONN_STR
+          catalog: my-test-catalog
+      - name: Check result
+        shell: pwsh
+        run: |
+          $connstr = $Env:SQL_CONN_STR
+          Write-Host "Connection String: $connstr"

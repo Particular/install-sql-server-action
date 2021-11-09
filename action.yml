@@ -1,0 +1,39 @@
+name: Run SQL Server
+description: Runs SQL Server using a method appropriate for the target platform
+inputs:
+  connection-string-env-var:
+    description: Name of the output environment variable that will receive the connection string
+    required: true
+  catalog:
+    description: Name of the initial database name (catalog) to create
+    required: false
+    default: nservicebus
+  extra-params:
+    description: Extra parameters to add to the connection string
+    required: false
+runs:
+  using: "composite"
+  steps:
+    - name: Install SQL Server (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh 
+      run: |
+        choco install sql-server-express
+        # Set necessary SQLCMD environment variable for the setup step
+        echo "SQLCMDSERVER=.\SQLEXPRESS" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
+        # Set connection string as environment variable for the tests
+        echo "${{ input.connection-string-env-var }}=Data Source=.\SQLEXPRESS;Initial Catalog=${{ input.catalog }};Integrated Security=True;${{ input.extra-params }}" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
+    - name: Start SQL Server (Linux)
+      if: runner.os == 'Linux'              
+      shell: bash         
+      run: |       
+        # If the password generator needs to be changed, make sure the resulting password meets SQL Server password requirements
+        sa_pw=$(uuidgen) 
+        echo "::add-mask::$sa_pw"
+        docker run -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=$sa_pw" -e "MSSQL_PID=Developer" -e "MSSQL_COLLATION=SQL_Latin1_General_CP1_CS_AS" -p 1433:1433 --name sqlserver -d mcr.microsoft.com/mssql/server:2017-latest
+        # Set necessary SQLCMD environment variable for the setup step
+        echo "SQLCMDPASSWORD=$sa_pw" >> $GITHUB_ENV
+        echo "SQLCMDUSER=sa" >> $GITHUB_ENV
+        echo "SQLCMDSERVER=localhost,1433" >> $GITHUB_ENV
+        # Set connection string as environment variable for the tests
+        echo "${{ input.connection-string-env-var }}=Server=localhost;Database=${{ input.catalog }};User Id=sa;Password=$sa_pw;${{ input.extra-params }}" >> $GITHUB_ENV  
