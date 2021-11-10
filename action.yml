@@ -41,13 +41,16 @@ runs:
       shell: pwsh
       run: |
         for ($i = 1; $i -le 30; $i++) {
-          try {
-            echo "Attempt $i/30 to connect to SQL Server..."
-            $result = sqlcmd -Q "SELECT @@SERVERNAME as ServerName"
+          echo "Attempt $i/30 to connect to SQL Server..."
+          ($result = sqlcmd -m-1 -Q "SELECT @@SERVERNAME as ServerName") | out-null
+          if ($? -eq 0) {
+            echo "Breaking"
             break
-          } catch {
+          } else {
+            echo "Sleep 1"
             Start-Sleep -seconds 1
           }
         }
 
+        echo "Creating initial catalog"
         sqlcmd -Q "CREATE DATABASE [${{ inputs.catalog }}]"
