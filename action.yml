@@ -55,11 +55,12 @@ runs:
 
         for ($i = 1; $i -le 30; $i++) {
           echo "Attempt $i/30 to connect to SQL Server..."
-          ($result = sqlcmd -m-1 -Q "SELECT @@SERVERNAME as ServerName") | out-null
+          sqlcmd -b -Q "SELECT @@SERVERNAME as ServerName" | out-null
           if ($?) {
             break
           } else {
-            Start-Sleep -seconds 1
+            echo "...sleeping for 5s"
+            Start-Sleep -seconds 5
           }
         }
 
