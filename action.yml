@@ -18,8 +18,10 @@ runs:
       if: runner.os == 'Windows'
       shell: pwsh 
       run: |
+        # Windows SQL install via Chocolatey
+
         echo "Installing SQL Server Express with Chocolatey..."
-        choco install sql-server-express
+        choco install sql-server-express --no-progress
 
         echo "Setting environment variables for sqlcmd..."
         echo "SQLCMDSERVER=.\SQLEXPRESS" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
@@ -29,7 +31,9 @@ runs:
     - name: Start SQL Server (Linux)
       if: runner.os == 'Linux'              
       shell: bash         
-      run: |       
+      run: |
+        # Linux SQL install via Docker
+        
         # If the password generator needs to be changed, make sure the resulting password meets SQL Server password requirements
         sa_pw=$(uuidgen) 
         echo "::add-mask::$sa_pw"
@@ -47,11 +51,12 @@ runs:
     - name: Setup server
       shell: pwsh
       run: |
+        # Wait for availability then create initial catalog
+
         for ($i = 1; $i -le 30; $i++) {
           echo "Attempt $i/30 to connect to SQL Server..."
           ($result = sqlcmd -m-1 -Q "SELECT @@SERVERNAME as ServerName") | out-null
           if ($?) {
-            echo "Breaking"
             break
           } else {
             Start-Sleep -seconds 1
