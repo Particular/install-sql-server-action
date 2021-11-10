@@ -34,5 +34,5 @@ jobs:
           $connstr = $Env:SQL_CONN_STR
           Write-Host "Connection String: $connstr"
 
-          $result = sqlcmd -Q "SELECT DB_NAME() as CatalogName" -d "${{ inputs.catalog-name }}"
+          $result = sqlcmd -Q "SELECT DB_NAME() as CatalogName" -d "my-test-catalog"
           echo $result

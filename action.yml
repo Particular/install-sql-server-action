@@ -18,10 +18,13 @@ runs:
       if: runner.os == 'Windows'
       shell: pwsh 
       run: |
+        echo "Installing SQL Server Express with Chocolatey..."
         choco install sql-server-express
-        # Set necessary SQLCMD environment variable for the setup step
+
+        echo "Setting environment variables for sqlcmd..."
         echo "SQLCMDSERVER=.\SQLEXPRESS" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
-        # Set connection string as environment variable for the tests
+
+        echo "Setting environment variable ${{ inputs.connection-string-env-var }} to SQL connection string..."
         echo "${{ inputs.connection-string-env-var }}=Data Source=.\SQLEXPRESS;Initial Catalog=${{ inputs.catalog }};Integrated Security=True;${{ inputs.extra-params }}" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
     - name: Start SQL Server (Linux)
       if: runner.os == 'Linux'              
@@ -30,12 +33,16 @@ runs:
         # If the password generator needs to be changed, make sure the resulting password meets SQL Server password requirements
         sa_pw=$(uuidgen) 
         echo "::add-mask::$sa_pw"
+
+        echo "Starting SQL Server in a Docker container..."
         docker run -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=$sa_pw" -e "MSSQL_PID=Developer" -e "MSSQL_COLLATION=SQL_Latin1_General_CP1_CS_AS" -p 1433:1433 --name sqlserver -d mcr.microsoft.com/mssql/server:2017-latest
-        # Set necessary SQLCMD environment variable for the setup step
+        
+        echo "Setting environment variables for sqlcmd..."
         echo "SQLCMDPASSWORD=$sa_pw" >> $GITHUB_ENV
         echo "SQLCMDUSER=sa" >> $GITHUB_ENV
         echo "SQLCMDSERVER=localhost,1433" >> $GITHUB_ENV
-        # Set connection string as environment variable for the tests
+
+        echo "Setting environment variable ${{ inputs.connection-string-env-var }} to SQL connection string..."
         echo "${{ inputs.connection-string-env-var }}=Server=localhost;Database=${{ inputs.catalog }};User Id=sa;Password=$sa_pw;${{ inputs.extra-params }}" >> $GITHUB_ENV  
     - name: Setup server
       shell: pwsh
@@ -43,14 +50,13 @@ runs:
         for ($i = 1; $i -le 30; $i++) {
           echo "Attempt $i/30 to connect to SQL Server..."
           ($result = sqlcmd -m-1 -Q "SELECT @@SERVERNAME as ServerName") | out-null
-          if ($? -eq 0) {
+          if ($?) {
             echo "Breaking"
             break
           } else {
-            echo "Sleep 1"
             Start-Sleep -seconds 1
           }
         }
 
-        echo "Creating initial catalog"
+        echo "Creating initial catalog '${{ inputs.catalog }}'"
         sqlcmd -Q "CREATE DATABASE [${{ inputs.catalog }}]"
