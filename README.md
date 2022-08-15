@@ -16,7 +16,7 @@ Install SQL Server with a default database of `nservicebus` and put the connecti
 ```yaml
 steps:
   - name: Install SQL Server
-    uses: Particular/install-sql-server-action@main
+    uses: Particular/install-sql-server-action@v1.0.0
     with:
       connection-string-env-var: SQL_SERVER_CONNECTION_STRING
       catalog: nservicebus
@@ -27,7 +27,7 @@ To add additional parameters to the end of the connection string, such as `Max P
 ```yaml
 steps:
   - name: Install SQL Server
-    uses: Particular/install-sql-server-action@main
+    uses: Particular/install-sql-server-action@v1.0.0
     with:
       connection-string-env-var: SQL_SERVER_CONNECTION_STRING
       catalog: nservicebus
@@ -51,7 +51,7 @@ For example:
 ```yaml
 steps:
   - name: Install SQL Server
-    uses: Particular/install-sql-server-action@main
+    uses: Particular/install-sql-server-action@v1.0.0
     with:
       connection-string-env-var: SQL_SERVER_CONNECTION_STRING
       catalog: nservicebus
