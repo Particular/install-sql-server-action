@@ -47,7 +47,7 @@ runs:
         echo "SQLCMDSERVER=localhost,1433" >> $GITHUB_ENV
 
         echo "Setting environment variable ${{ inputs.connection-string-env-var }} to SQL connection string..."
-        echo "${{ inputs.connection-string-env-var }}=Server=localhost;Database=${{ inputs.catalog }};User Id=sa;Password=$sa_pw;Integrated Security=True;${{ inputs.extra-params }}" >> $GITHUB_ENV  
+        echo "${{ inputs.connection-string-env-var }}=Server=localhost;Database=${{ inputs.catalog }};User Id=sa;Password=$sa_pw;TrustServerCertificate=false;${{ inputs.extra-params }}" >> $GITHUB_ENV  
     - name: Setup server
       shell: pwsh
       run: |
