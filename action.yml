@@ -27,7 +27,7 @@ runs:
         echo "SQLCMDSERVER=.\SQLEXPRESS" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
 
         echo "Setting environment variable ${{ inputs.connection-string-env-var }} to SQL connection string..."
-        echo "${{ inputs.connection-string-env-var }}=Data Source=.\SQLEXPRESS;Initial Catalog=${{ inputs.catalog }};Integrated Security=True;${{ inputs.extra-params }}" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
+        echo "${{ inputs.connection-string-env-var }}=Data Source=.\SQLEXPRESS;Initial Catalog=${{ inputs.catalog }};Integrated Security=True;TrustServerCertificate=false;${{ inputs.extra-params }}" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
     - name: Start SQL Server (Linux)
       if: runner.os == 'Linux'              
       shell: bash         
