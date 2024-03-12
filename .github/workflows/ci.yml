@@ -16,9 +16,9 @@ jobs:
       matrix:
         include:
           - name: Windows
-            os: windows-2019
+            os: windows-2022
           - name: Linux
-            os: ubuntu-20.04
+            os: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
