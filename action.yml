@@ -25,7 +25,7 @@ runs:
                           ForEach-Object { $_.Matches.Groups[1].Value } |
                           Sort-Object -Descending
 
-        $newestVersion = $sortedVersions[0]
+        $newestVersion = $sortedVersions.Split('\n')[0]
 
         if ($newestVersion) {
             Write-Host "Installing SQL Server Express version $newestVersion with Chocolatey..."
