@@ -19,9 +19,21 @@ runs:
       shell: pwsh 
       run: |
         # Windows SQL install via Chocolatey
+        $availableVersions = choco search sql-server-express --all-versions | Where-Object { $_ -like "*2022*" }
+        $sortedVersions = $availableVersions |
+                          Select-String -Pattern 'sql-server-express\s+(\d+\.\d+\.\d+\.\d+)' -AllMatches |
+                          ForEach-Object { $_.Matches.Groups[1].Value } |
+                          Sort-Object -Version -Descending
 
-        echo "Installing SQL Server Express with Chocolatey..."
-        choco install sql-server-express --no-progress
+        $newestVersion = $sortedVersions[0]
+
+        if ($newestVersion) {
+            Write-Host "Installing SQL Server Express version $newestVersion with Chocolatey..."
+            choco install sql-server-express --version $newestVersion -y --no-progress
+        } else {
+            Write-Host "No versions found matching the prefix '$VersionPrefix'. Installing latest with Chocolatey..."
+            choco install sql-server-express --no-progress
+        }
 
         echo "Setting environment variables for sqlcmd..."
         echo "SQLCMDSERVER=.\SQLEXPRESS" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
