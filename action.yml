@@ -19,11 +19,11 @@ runs:
       shell: pwsh 
       run: |
         # Windows SQL install via Chocolatey
-        $availableVersions = choco search sql-server-express --all-versions | Where-Object { $_ -like "*2022*" }
+        $availableVersions = choco search --exact sql-server-express --all-versions | Where-Object { $_ -like "*2022*" }
         $sortedVersions = $availableVersions |
                           Select-String -Pattern 'sql-server-express\s+(\d+\.\d+\.\d+\.\d+)' -AllMatches |
                           ForEach-Object { $_.Matches.Groups[1].Value } |
-                          Sort-Object -Version -Descending
+                          Sort-Object -Descending
 
         $newestVersion = $sortedVersions[0]
 
