@@ -8,6 +8,10 @@ inputs:
     description: Name of the initial database name (catalog) to create
     required: false
     default: nservicebus
+  sqlserver-version:
+    description: The SQL server major version to use
+    required: false
+    default: "2022"
   extra-params:
     description: Extra parameters to add to the connection string
     required: false
@@ -19,7 +23,7 @@ runs:
       shell: pwsh 
       run: |
         # Windows SQL install via Chocolatey
-        $availableVersions = choco search --exact sql-server-express --all-versions | Where-Object { $_ -like "*2022*" }
+        $availableVersions = choco search --exact sql-server-express --all-versions | Where-Object { $_ -like "*${{ inputs.sqlserver-version }}*" }
         $sortedVersions = $availableVersions |
                           Select-String -Pattern 'sql-server-express\s+(\d+\.\d+\.\d+\.\d+)' -AllMatches |
                           ForEach-Object { $_.Matches.Groups[1].Value } |
@@ -51,7 +55,7 @@ runs:
         echo "::add-mask::$sa_pw"
 
         echo "Starting SQL Server in a Docker container..."
-        docker run -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=$sa_pw" -e "MSSQL_PID=Developer" -e "MSSQL_COLLATION=SQL_Latin1_General_CP1_CS_AS" -p 1433:1433 --name sqlserver -d mcr.microsoft.com/mssql/server:2022-latest
+        docker run -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=$sa_pw" -e "MSSQL_PID=Developer" -e "MSSQL_COLLATION=SQL_Latin1_General_CP1_CS_AS" -p 1433:1433 --name sqlserver -d mcr.microsoft.com/mssql/server:${{ inputs.sqlserver-version }}-latest
         
         echo "Setting environment variables for sqlcmd..."
         echo "SQLCMDPASSWORD=$sa_pw" >> $GITHUB_ENV
