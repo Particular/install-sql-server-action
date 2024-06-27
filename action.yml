@@ -23,13 +23,14 @@ runs:
       shell: pwsh 
       run: |
         # Windows SQL install via Chocolatey
-        $availableVersions = choco search --exact sql-server-express --all-versions | Where-Object { $_ -like "*${{ inputs.sqlserver-version }}*" }
-        $sortedVersions = $availableVersions |
-                          Select-String -Pattern 'sql-server-express\s+(\d+\.\d+\.\d+\.\d+)' -AllMatches |
-                          ForEach-Object { $_.Matches.Groups[1].Value } |
-                          Sort-Object -Descending
-
-        $newestVersion = $sortedVersions.Split('\n')[0]
+        $template = @'
+        {[string]Package*:sql-server-express}|{[int]Major:2022}.{[int]Minor:16}.{[int]Patch:0}.{[int]Build:1000}
+        {[string]Package*:sql-server-express}|{[int]Major:14}.{[int]Minor:1801}.{[int]Patch:3958}.{[int]Build:1}
+        '@
+        
+        $availableVersions = choco search sql-server-express --exact --all-versions --limit-output | Where-Object { $_ -like "*${{ inputs.sqlserver-version }}**" }
+        $sortedVersions = $availableVersions | ConvertFrom-String -TemplateContent $template | Sort-Object -Property Major -Descending
+        $newestVersion = $sortedVersions[0]
 
         if ($newestVersion) {
             Write-Host "Installing SQL Server Express version $newestVersion with Chocolatey..."
