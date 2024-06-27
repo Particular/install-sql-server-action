@@ -25,12 +25,15 @@ runs:
         # Windows SQL install via Chocolatey
         $template = @'
         {[string]Package*:sql-server-express}|{[int]Major:2022}.{[int]Minor:16}.{[int]Patch:0}.{[int]Build:1000}
+        {[string]Package*:sql-server-express}|{[int]Major:2022}.{[int]Minor:16}.{[int]Patch:0}.{[int]Build:0}
         {[string]Package*:sql-server-express}|{[int]Major:14}.{[int]Minor:1801}.{[int]Patch:3958}.{[int]Build:1}
         '@
-        
+
+        # Limited output should be sql-server-express|versionstring
         $availableVersions = choco search sql-server-express --exact --all-versions --limit-output | Where-Object { $_ -like "*${{ inputs.sqlserver-version }}**" }
-        $sortedVersions = $availableVersions | ConvertFrom-String -TemplateContent $template | Sort-Object -Property Major -Descending
-        $newestVersion = $sortedVersions[0]
+        # IncludeExtent will feed the input into an ExtendText property. Using the template examples helps to order by Major which is all we are interested in
+        $sortedVersions = $availableVersions | ConvertFrom-String -TemplateContent $template -IncludeExtent | Sort-Object -Property Major -Descending
+        $newestVersion = $sortedVersions[0].ExtentText.Split("|")[1]
 
         if ($newestVersion) {
             Write-Host "Installing SQL Server Express version $newestVersion with Chocolatey..."
