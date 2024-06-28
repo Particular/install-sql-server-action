@@ -39,7 +39,7 @@ runs:
             Write-Host "Installing SQL Server Express version $newestVersion with Chocolatey..."
             choco install sql-server-express --version $newestVersion -y --no-progress
         } else {
-            Write-Host "No versions found matching the prefix '$VersionPrefix'. Installing latest with Chocolatey..."
+            Write-Host "No versions found matching the prefix '${{ inputs.sqlserver-version }}'. Installing latest with Chocolatey..."
             choco install sql-server-express --no-progress
         }
 
