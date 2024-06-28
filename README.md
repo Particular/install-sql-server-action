@@ -52,6 +52,7 @@ steps:
 |-|:-:|:-:|-|
 | `connection-string-env-var` | Yes | - | Environment variable name that will be filled with the SQL connection string, which can then be used in successive steps. |
 | `catalog` | No | `nservicebus` | The default catalog, which will be created by the action. |
+| `sqlserver-version` | No | "2022" | The SQL server major version to use. |
 | `extra-params` | No | - | Extra parameters to be appended to the end of the connection string |
 
 ## Using `sqlcmd`
