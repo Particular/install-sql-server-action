@@ -27,7 +27,7 @@ It is also possible to specify the SQl server major version to be installed
 ```yaml
 steps:
   - name: Install SQL Server
-    uses: Particular/install-sql-server-action@v1.0.0
+    uses: Particular/install-sql-server-action@v1.2.0
     with:
       connection-string-env-var: SQL_SERVER_CONNECTION_STRING
       sqlserver-version: 2019
