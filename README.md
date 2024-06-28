@@ -11,7 +11,7 @@ This action installs and runs SQL Server for a GitHub Actions workflow.
 
 ## Usage
 
-Install SQL Server with a default database of `nservicebus` and put the connection string in the environment variable `SQL_SERVER_CONNECTION_STRING`:
+Install SQL Server 2022 with a default database of `nservicebus` and put the connection string in the environment variable `SQL_SERVER_CONNECTION_STRING`:
 
 ```yaml
 steps:
@@ -19,6 +19,18 @@ steps:
     uses: Particular/install-sql-server-action@v1.0.0
     with:
       connection-string-env-var: SQL_SERVER_CONNECTION_STRING
+      catalog: nservicebus
+```
+
+It is also possible to specify the SQl server major version to be installed
+
+```yaml
+steps:
+  - name: Install SQL Server
+    uses: Particular/install-sql-server-action@v1.0.0
+    with:
+      connection-string-env-var: SQL_SERVER_CONNECTION_STRING
+      sqlserver-version: 2019
       catalog: nservicebus
 ```
 
