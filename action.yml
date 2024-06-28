@@ -56,18 +56,18 @@ runs:
         
         # If the password generator needs to be changed, make sure the resulting password meets SQL Server password requirements
         sa_pw=$(uuidgen) 
-        Write-Output "::add-mask::$sa_pw"
+        echo "::add-mask::$sa_pw"
 
-        Write-Output "Starting SQL Server in a Docker container..."
+        echo "Starting SQL Server in a Docker container..."
         docker run -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=$sa_pw" -e "MSSQL_PID=Developer" -e "MSSQL_COLLATION=SQL_Latin1_General_CP1_CS_AS" -p 1433:1433 --name sqlserver -d mcr.microsoft.com/mssql/server:${{ inputs.sqlserver-version }}-latest
         
-        Write-Output "Setting environment variables for sqlcmd..."
-        Write-Output "SQLCMDPASSWORD=$sa_pw" >> $GITHUB_ENV
-        Write-Output "SQLCMDUSER=sa" >> $GITHUB_ENV
-        Write-Output "SQLCMDSERVER=localhost,1433" >> $GITHUB_ENV
+        echo "Setting environment variables for sqlcmd..."
+        echo "SQLCMDPASSWORD=$sa_pw" >> $GITHUB_ENV
+        echo "SQLCMDUSER=sa" >> $GITHUB_ENV
+        echo "SQLCMDSERVER=localhost,1433" >> $GITHUB_ENV
 
-        Write-Output "Setting environment variable ${{ inputs.connection-string-env-var }} to SQL connection string..."
-        Write-Output "${{ inputs.connection-string-env-var }}=Server=localhost;Database=${{ inputs.catalog }};User Id=sa;Password=$sa_pw;Encrypt=false;${{ inputs.extra-params }}" >> $GITHUB_ENV  
+        echo "Setting environment variable ${{ inputs.connection-string-env-var }} to SQL connection string..."
+        echo "${{ inputs.connection-string-env-var }}=Server=localhost;Database=${{ inputs.catalog }};User Id=sa;Password=$sa_pw;Encrypt=false;${{ inputs.extra-params }}" >> $GITHUB_ENV  
     - name: Setup server
       shell: pwsh
       run: |
