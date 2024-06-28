@@ -8,6 +8,10 @@ inputs:
     description: Name of the initial database name (catalog) to create
     required: false
     default: nservicebus
+  sqlserver-version:
+    description: The SQL server major version to use
+    required: false
+    default: "2022"
   extra-params:
     description: Extra parameters to add to the connection string
     required: false
@@ -19,15 +23,31 @@ runs:
       shell: pwsh 
       run: |
         # Windows SQL install via Chocolatey
+        $template = @'
+        {[string]Package*:sql-server-express}|{[int]Major:2022}.{[int]Minor:16}.{[int]Patch:0}.{[int]Build:1000}
+        {[string]Package*:sql-server-express}|{[int]Major:2022}.{[int]Minor:16}.{[int]Patch:0}.{[int]Build:0}
+        {[string]Package*:sql-server-express}|{[int]Major:14}.{[int]Minor:1801}.{[int]Patch:3958}.{[int]Build:1}
+        '@
 
-        echo "Installing SQL Server Express with Chocolatey..."
-        choco install sql-server-express --no-progress
+        # Limited output should be sql-server-express|versionstring
+        $availableVersions = choco search sql-server-express --exact --all-versions --limit-output | Where-Object { $_ -like "*${{ inputs.sqlserver-version }}**" }
+        # IncludeExtent will feed the input into an ExtendText property. Using the template examples helps to order by Major which is all we are interested in
+        $sortedVersions = $availableVersions | ConvertFrom-String -TemplateContent $template -IncludeExtent | Sort-Object -Property Major -Descending
+        $newestVersion = $sortedVersions[0].ExtentText.Split("|")[1]
 
-        echo "Setting environment variables for sqlcmd..."
-        echo "SQLCMDSERVER=.\SQLEXPRESS" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
+        if ($newestVersion) {
+            Write-Output "Installing SQL Server Express version $newestVersion with Chocolatey..."
+            choco install sql-server-express --version $newestVersion -y --no-progress
+        } else {
+            Write-Output "No versions found matching the prefix '${{ inputs.sqlserver-version }}'. Installing latest with Chocolatey..."
+            choco install sql-server-express --no-progress
+        }
 
-        echo "Setting environment variable ${{ inputs.connection-string-env-var }} to SQL connection string..."
-        echo "${{ inputs.connection-string-env-var }}=Data Source=.\SQLEXPRESS;Initial Catalog=${{ inputs.catalog }};Integrated Security=True;Encrypt=false;${{ inputs.extra-params }}" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
+        Write-Output "Setting environment variables for sqlcmd..."
+        Write-Output "SQLCMDSERVER=.\SQLEXPRESS" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
+
+        Write-Output "Setting environment variable ${{ inputs.connection-string-env-var }} to SQL connection string..."
+        Write-Output "${{ inputs.connection-string-env-var }}=Data Source=.\SQLEXPRESS;Initial Catalog=${{ inputs.catalog }};Integrated Security=True;Encrypt=false;${{ inputs.extra-params }}" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
     - name: Start SQL Server (Linux)
       if: runner.os == 'Linux'              
       shell: bash         
@@ -39,7 +59,7 @@ runs:
         echo "::add-mask::$sa_pw"
 
         echo "Starting SQL Server in a Docker container..."
-        docker run -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=$sa_pw" -e "MSSQL_PID=Developer" -e "MSSQL_COLLATION=SQL_Latin1_General_CP1_CS_AS" -p 1433:1433 --name sqlserver -d mcr.microsoft.com/mssql/server:2022-latest
+        docker run -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=$sa_pw" -e "MSSQL_PID=Developer" -e "MSSQL_COLLATION=SQL_Latin1_General_CP1_CS_AS" -p 1433:1433 --name sqlserver -d mcr.microsoft.com/mssql/server:${{ inputs.sqlserver-version }}-latest
         
         echo "Setting environment variables for sqlcmd..."
         echo "SQLCMDPASSWORD=$sa_pw" >> $GITHUB_ENV
@@ -54,16 +74,16 @@ runs:
         # Wait for availability then create initial catalog
 
         for ($i = 1; $i -le 30; $i++) {
-          echo "Attempt $i/30 to connect to SQL Server..."
+          Write-Output "Attempt $i/30 to connect to SQL Server..."
           sqlcmd -b -Q "SELECT @@SERVERNAME as ServerName" 2>&1>$null
           if ($?) {
-            echo "  - SQL Server is now ready"
+            Write-Output "  - SQL Server is now ready"
             break
           } else {
-            echo "  - Not ready, sleeping for 5s"
+            Write-Output "  - Not ready, sleeping for 5s"
             Start-Sleep -seconds 5
           }
         }
 
-        echo "Creating initial catalog '${{ inputs.catalog }}'"
+        Write-Output "Creating initial catalog '${{ inputs.catalog }}'"
         sqlcmd -Q "CREATE DATABASE [${{ inputs.catalog }}]"
