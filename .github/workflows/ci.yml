@@ -9,8 +9,8 @@ on:
   workflow_dispatch:
 jobs:
   ci:
-    runs-on: ${{ matrix.name }}-${{ matrix.sqlserver.label }}
-    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}-${{ matrix.sqlserver.label }}
     strategy:
       fail-fast: false
       matrix:
