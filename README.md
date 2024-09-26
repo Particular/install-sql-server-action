@@ -5,6 +5,7 @@ This action installs and runs SQL Server for a GitHub Actions workflow.
 1. Installs SQL Server
   * On Windows, uses [Chocolatey](https://chocolatey.org/) to install [SQL Server Express](https://community.chocolatey.org/packages/sql-server-express).
   * On Linux, runs SQL as a Docker container using the `mcr.microsoft.com/mssql/server:2022-latest` image.
+  * Sets collation to case sensitive `SQL_Latin1_General_CP1_CS_AS` note SQL Azure is insensitive `CI_AS`
 1. Creates environement variables for a connection string and for `sqlcmd`.
 1. Waits for the SQL instance to be accessible.
 1. Creates a default database catalog.
