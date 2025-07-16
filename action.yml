@@ -43,11 +43,6 @@ runs:
             choco install sql-server-express --no-progress
         }
 
-        Write-Output "Refreshing env"
-        Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
-        refreshenv
-        Write-Output "PATH=$($Env:PATH)"
-
         Write-Output "Setting environment variables for sqlcmd..."
         Write-Output "SQLCMDSERVER=.\SQLEXPRESS" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
 
@@ -88,7 +83,6 @@ runs:
       shell: pwsh
       run: |
         # Wait for availability then create initial catalog
-        Write-Output "PATH=$($Env:PATH)"
 
         for ($i = 1; $i -le 30; $i++) {
           Write-Output "Attempt $i/30 to connect to SQL Server..."
