@@ -68,7 +68,7 @@ runs:
                    -e "SQLCMDPASSWORD=$sa_pw" \
                    -p 1433:1433 --name sqlserver -d mcr.microsoft.com/mssql/server:${{ inputs.sqlserver-version }}-latest
         
-        echo "Creating fake `sqlcmd` bash script to forward commands via docker exec
+        echo "Creating fake `sqlcmd` bash script to forward commands via docker exec"
         mkdir -p ~/bin
         cat << 'EOF' > ~/bin/sqlcmd
         #!/bin/bash
