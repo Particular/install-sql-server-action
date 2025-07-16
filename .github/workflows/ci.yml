@@ -14,16 +14,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2022, ubuntu-22.04]
+        os: [windows-latest, ubuntu-latest]
         sqlserver:
           - label: 'SQL Server 2022'
             version: '2022'
           - label: 'SQL Server 2019'  
             version: '2019'
         include:
-          - os: windows-2022
+          - os: windows-latest
             name: Windows
-          - os: ubuntu-22.04
+          - os: ubuntu-latest
             name: Linux
     steps:
       - name: Checkout
