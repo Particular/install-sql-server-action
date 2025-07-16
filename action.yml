@@ -75,7 +75,7 @@ runs:
 
         for ($i = 1; $i -le 30; $i++) {
           Write-Output "Attempt $i/30 to connect to SQL Server..."
-          /opt/mssql-tools18/bin/sqlcmd -b -Q "SELECT @@SERVERNAME as ServerName" 2>&1>$null
+          docker exec sqlserver /opt/mssql-tools18/bin/sqlcmd -b -Q "SELECT @@SERVERNAME as ServerName" 2>&1>$null
           if ($?) {
             Write-Output "  - SQL Server is now ready"
             break
@@ -86,4 +86,4 @@ runs:
         }
 
         Write-Output "Creating initial catalog '${{ inputs.catalog }}'"
-        /opt/mssql-tools18/bin/sqlcmd -Q "CREATE DATABASE [${{ inputs.catalog }}]"
+        docker exec sqlserver /opt/mssql-tools18/bin/sqlcmd -Q "CREATE DATABASE [${{ inputs.catalog }}]"
