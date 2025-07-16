@@ -43,6 +43,10 @@ runs:
             choco install sql-server-express --no-progress
         }
 
+        Write-Output "Refreshing env"
+        refreshenv
+        Write-Output "PATH=$($Env:PATH)"
+
         Write-Output "Setting environment variables for sqlcmd..."
         Write-Output "SQLCMDSERVER=.\SQLEXPRESS" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
 
@@ -83,10 +87,11 @@ runs:
       shell: pwsh
       run: |
         # Wait for availability then create initial catalog
+        Write-Output "PATH=$($Env:PATH)"
 
         for ($i = 1; $i -le 30; $i++) {
           Write-Output "Attempt $i/30 to connect to SQL Server..."
-          docker exec sqlserver /opt/mssql-tools18/bin/sqlcmd -C -b -Q "SELECT @@SERVERNAME as ServerName" 2>&1>$null
+          sqlcmd -b -Q "SELECT @@SERVERNAME as ServerName" 2>&1>$null
           if ($?) {
             Write-Output "  - SQL Server is now ready"
             break
@@ -97,4 +102,4 @@ runs:
         }
 
         Write-Output "Creating initial catalog '${{ inputs.catalog }}'"
-        docker exec sqlserver /opt/mssql-tools18/bin/sqlcmd -C -Q "CREATE DATABASE [${{ inputs.catalog }}]"
+        sqlcmd -Q "CREATE DATABASE [${{ inputs.catalog }}]"
