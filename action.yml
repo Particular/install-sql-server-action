@@ -75,6 +75,7 @@ runs:
         docker exec sqlserver /opt/mssql-tools18/bin/sqlcmd -C "$@"
         EOF
         chmod +x ~/bin/sqlcmd
+        echo "$HOME/bin" >> $GITHUB_PATH
 
         echo "Setting environment variable ${{ inputs.connection-string-env-var }} to SQL connection string..."
         echo "${{ inputs.connection-string-env-var }}=Server=localhost;Database=${{ inputs.catalog }};User Id=sa;Password=$sa_pw;Encrypt=false;${{ inputs.extra-params }}" >> $GITHUB_ENV  
