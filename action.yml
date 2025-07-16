@@ -68,13 +68,17 @@ runs:
                    -e "SQLCMDPASSWORD=$sa_pw" \
                    -p 1433:1433 --name sqlserver -d mcr.microsoft.com/mssql/server:${{ inputs.sqlserver-version }}-latest
         
-        echo "Creating fake `sqlcmd` bash script to forward commands via docker exec"
+        echo "Creating `sqlcmd` bash script to forward commands via docker exec"
         mkdir -p ~/bin
         cat << 'EOF' > ~/bin/sqlcmd
         #!/bin/bash
         docker exec sqlserver /opt/mssql-tools18/bin/sqlcmd -C "$@"
         EOF
+
+        echo "Making forwarding sqlcmd script executable"
         chmod +x ~/bin/sqlcmd
+
+        echo "Adding sqlcmd forwarding script to PATH"
         echo "$HOME/bin" >> $GITHUB_PATH
 
         echo "Setting environment variable ${{ inputs.connection-string-env-var }} to SQL connection string..."
