@@ -1,6 +1,6 @@
 # install-sql-server
 
-This action installs and runs SQL Server for a GitHub Actions workflow.
+This action installs and runs SQL Server for a GitHub Actions workflow. Also [adds support for sqlcmd](#using-sqlcmd).
 
 1. Installs SQL Server
   * On Windows, uses [Chocolatey](https://chocolatey.org/) to install [SQL Server Express](https://community.chocolatey.org/packages/sql-server-express).
@@ -17,7 +17,7 @@ Install SQL Server 2022 with a default database of `nservicebus` and put the con
 ```yaml
 steps:
   - name: Install SQL Server
-    uses: Particular/install-sql-server-action@v1.0.0
+    uses: Particular/install-sql-server-action@v1.3.0
     with:
       connection-string-env-var: SQL_SERVER_CONNECTION_STRING
       catalog: nservicebus
@@ -28,7 +28,7 @@ It is also possible to specify the SQl server major version to be installed
 ```yaml
 steps:
   - name: Install SQL Server
-    uses: Particular/install-sql-server-action@v1.2.0
+    uses: Particular/install-sql-server-action@v1.3.0
     with:
       connection-string-env-var: SQL_SERVER_CONNECTION_STRING
       sqlserver-version: 2019
@@ -40,7 +40,7 @@ To add additional parameters to the end of the connection string, such as `Max P
 ```yaml
 steps:
   - name: Install SQL Server
-    uses: Particular/install-sql-server-action@v1.0.0
+    uses: Particular/install-sql-server-action@v1.3.0
     with:
       connection-string-env-var: SQL_SERVER_CONNECTION_STRING
       catalog: nservicebus
@@ -58,7 +58,10 @@ steps:
 
 ## Using `sqlcmd`
 
-The action creates the necessary environment variables so that `sqlcmd` can be used without any additional login parameters.
+The action also makes it possible to run `sqlcmd`. How it does this is different based on platform:
+
+- Windows: `sqlcmd` is installed along with SQL Express. The action creates the necessary environment variables so that `sqlcmd` can be used without any additional login parameters.
+- Linux: A bash script named `sqlcmd` is created and added to the PATH. All commands to it are forwarded to the Docker container via `docker exec`. The Docker container is initialized with environment variables so that login parameters are not necessary.
 
 For example:
 
