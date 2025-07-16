@@ -44,6 +44,7 @@ runs:
         }
 
         Write-Output "Refreshing env"
+        Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
         refreshenv
         Write-Output "PATH=$($Env:PATH)"
 
