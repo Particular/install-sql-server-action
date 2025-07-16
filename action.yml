@@ -68,10 +68,13 @@ runs:
                    -e "SQLCMDPASSWORD=$sa_pw" \
                    -p 1433:1433 --name sqlserver -d mcr.microsoft.com/mssql/server:${{ inputs.sqlserver-version }}-latest
         
-        echo "Setting environment variables for sqlcmd..."
-        echo "SQLCMDPASSWORD=$sa_pw" >> $GITHUB_ENV
-        echo "SQLCMDUSER=sa" >> $GITHUB_ENV
-        echo "SQLCMDSERVER=localhost,1433" >> $GITHUB_ENV
+        echo "Creating fake `sqlcmd` bash script to forward commands via docker exec
+        mkdir -p ~/bin
+        cat << 'EOF' > ~/bin/sqlcmd
+        #!/bin/bash
+        docker exec sqlserver /opt/mssql-tools18/bin/sqlcmd -C "$@"
+        EOF
+        chmod +x ~/bin/sqlcmd
 
         echo "Setting environment variable ${{ inputs.connection-string-env-var }} to SQL connection string..."
         echo "${{ inputs.connection-string-env-var }}=Server=localhost;Database=${{ inputs.catalog }};User Id=sa;Password=$sa_pw;Encrypt=false;${{ inputs.extra-params }}" >> $GITHUB_ENV  
