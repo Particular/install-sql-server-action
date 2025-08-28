@@ -8,6 +8,10 @@ inputs:
     description: Name of the initial database name (catalog) to create
     required: false
     default: nservicebus
+  collation:
+    description: Override to change from Latinq case sensitive, i.e. SQL Azure uses SQL_Latin1_General_CP1_CI_AS insensitive
+    required: false
+    default: "SQL_Latin1_General_CP1_CS_AS"
   sqlserver-version:
     description: The SQL server major version to use
     required: false
@@ -62,7 +66,7 @@ runs:
         docker run -e "ACCEPT_EULA=Y" \
                    -e "SA_PASSWORD=$sa_pw" \
                    -e "MSSQL_PID=Developer" \
-                   -e "MSSQL_COLLATION=SQL_Latin1_General_CP1_CS_AS" \
+                   -e "MSSQL_COLLATION=${{ inputs.collation }}" \
                    -e "SQLCMDSERVER=localhost" \
                    -e "SQLCMDUSER=sa" \
                    -e "SQLCMDPASSWORD=$sa_pw" \
