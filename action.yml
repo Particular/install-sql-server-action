@@ -24,7 +24,7 @@ runs:
   steps:
     - name: Install SQL Server (Windows)
       if: runner.os == 'Windows'
-      shell: pwsh 
+      shell: pwsh
       run: |
         # Windows SQL install via Chocolatey
         $template = @'
@@ -53,13 +53,13 @@ runs:
         Write-Output "Setting environment variable ${{ inputs.connection-string-env-var }} to SQL connection string..."
         Write-Output "${{ inputs.connection-string-env-var }}=Data Source=.\SQLEXPRESS;Initial Catalog=${{ inputs.catalog }};Integrated Security=True;Encrypt=false;${{ inputs.extra-params }}" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
     - name: Start SQL Server (Linux)
-      if: runner.os == 'Linux'              
-      shell: bash         
+      if: runner.os == 'Linux'
+      shell: bash
       run: |
         # Linux SQL install via Docker
-        
+
         # If the password generator needs to be changed, make sure the resulting password meets SQL Server password requirements
-        sa_pw=$(uuidgen) 
+        sa_pw=$(uuidgen)
         echo "::add-mask::$sa_pw"
 
         echo "Starting SQL Server in a Docker container..."
@@ -71,7 +71,7 @@ runs:
                    -e "SQLCMDUSER=sa" \
                    -e "SQLCMDPASSWORD=$sa_pw" \
                    -p 1433:1433 --name sqlserver -d mcr.microsoft.com/mssql/server:${{ inputs.sqlserver-version }}-latest
-        
+
         echo "Creating `sqlcmd` bash script to forward commands via docker exec"
         mkdir -p ~/bin
         cat << 'EOF' > ~/bin/sqlcmd
@@ -86,7 +86,7 @@ runs:
         echo "$HOME/bin" >> $GITHUB_PATH
 
         echo "Setting environment variable ${{ inputs.connection-string-env-var }} to SQL connection string..."
-        echo "${{ inputs.connection-string-env-var }}=Server=localhost;Database=${{ inputs.catalog }};User Id=sa;Password=$sa_pw;Encrypt=false;${{ inputs.extra-params }}" >> $GITHUB_ENV  
+        echo "${{ inputs.connection-string-env-var }}=Server=localhost;Database=${{ inputs.catalog }};User Id=sa;Password=$sa_pw;Encrypt=false;${{ inputs.extra-params }}" >> $GITHUB_ENV
     - name: Setup server
       shell: pwsh
       run: |
