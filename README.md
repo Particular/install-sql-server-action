@@ -53,8 +53,9 @@ steps:
 |-|:-:|:-:|-|
 | `connection-string-env-var` | Yes | - | Environment variable name that will be filled with the SQL connection string, which can then be used in successive steps. |
 | `catalog` | No | `nservicebus` | The default catalog, which will be created by the action. |
-| `sqlserver-version` | No | "2022" | The SQL server major version to use. |
-| `extra-params` | No | - | Extra parameters to be appended to the end of the connection string |
+| `collation` | No | `SQL_Latin1_General_CP1_CS_AS` | The collation to use for the SQL Server database. Override to any available [SQL collation](https://learn.microsoft.com/en-us/sql/relational-databases/collations/collation-and-unicode-support). |
+| `sqlserver-version` | No | `2022` | The SQL server major version to use. |
+| `extra-params` | No | - | Extra parameters to be appended to the end of the connection string. |
 
 ## Using `sqlcmd`
 
