@@ -9,7 +9,7 @@ inputs:
     required: false
     default: nservicebus
   collation:
-    description: Override to change from Latinq case sensitive, i.e. SQL Azure uses SQL_Latin1_General_CP1_CI_AS insensitive
+    description: The collation to use for the SQL Server database
     required: false
     default: "SQL_Latin1_General_CP1_CS_AS"
   sqlserver-version:
