@@ -32,7 +32,7 @@ runs:
       run: |
         # Windows SQL install via Chocolatey
         $enableFts = '${{ inputs.enable-full-text-search }}' -eq 'true'
-        $packageName = if ($enableFts) { 'sql-server-express-advanced' } else { 'sql-server-express' }
+        $packageName = if ($enableFts) { 'sql-server-express-adv' } else { 'sql-server-express' }
 
         # Limited output is package|version
         $newestVersion = choco search $packageName --exact --all-versions --limit-output `
