@@ -82,7 +82,42 @@ runs:
           docker exec -u 0 sqlserver bash -lc '
             set -euo pipefail
             apt-get update
-            ACCEPT_EULA=Y apt-get install -y mssql-server-fts
+            ACCEPT_EULA=Y apt-get install -y --no-install-recommends curl gnupg
+
+            # Detect the SQL Server engine major version from the installed binary.
+            # Docker images are not guaranteed to have apt metadata for mssql-server.
+            sql_engine_major=$(/opt/mssql/bin/sqlservr -v \
+              | sed -n "s/.* \([0-9][0-9]*\)\..*/\1/p" \
+              | head -n 1)
+
+            case "$sql_engine_major" in
+              16) repo_channel=2022 ;;
+              15) repo_channel=2019 ;;
+              *)
+                echo "Unsupported SQL Server engine major version: ${sql_engine_major:-unknown}" >&2
+                exit 1
+                ;;
+            esac
+
+            . /etc/os-release
+            curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+              | gpg --dearmor > /usr/share/keyrings/microsoft-prod.gpg
+            echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/${VERSION_ID}/mssql-server-${repo_channel} ${VERSION_CODENAME} main" \
+              > /etc/apt/sources.list.d/mssql-server.list
+
+            apt-get update
+
+            fts_version=$(apt-cache madison mssql-server-fts \
+              | awk "{print \$3}" \
+              | grep -E "^${sql_engine_major}\\." \
+              | head -n 1)
+
+            if [ -z "${fts_version}" ]; then
+              echo "No mssql-server-fts package found for SQL Server engine major ${sql_engine_major}." >&2
+              exit 1
+            fi
+
+            ACCEPT_EULA=Y apt-get install -y --no-install-recommends "mssql-server-fts=${fts_version}"
             apt-get clean
             rm -rf /var/lib/apt/lists/*
           '
