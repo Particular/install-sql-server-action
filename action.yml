@@ -67,15 +67,27 @@ runs:
         sa_pw=$(uuidgen)
         echo "::add-mask::$sa_pw"
 
-        echo "Starting SQL Server in a Docker container..."
-        docker run -e "ACCEPT_EULA=Y" \
-                   -e "SA_PASSWORD=$sa_pw" \
-                   -e "MSSQL_PID=Developer" \
-                   -e "MSSQL_COLLATION=${{ inputs.collation }}" \
-                   -e "SQLCMDSERVER=localhost" \
-                   -e "SQLCMDUSER=sa" \
-                   -e "SQLCMDPASSWORD=$sa_pw" \
-                   -p 1433:1433 --name sqlserver -d mcr.microsoft.com/mssql/server:${{ inputs.sqlserver-version }}-latest
+        image="mcr.microsoft.com/mssql/server:${{ inputs.sqlserver-version }}-latest"
+        base_run_args=(
+          -e "ACCEPT_EULA=Y"
+          -e "SA_PASSWORD=$sa_pw"
+          -e "MSSQL_PID=Developer"
+          -e "MSSQL_COLLATION=${{ inputs.collation }}"
+          -e "SQLCMDSERVER=localhost"
+          -e "SQLCMDUSER=sa"
+          -e "SQLCMDPASSWORD=$sa_pw"
+          -p 1433:1433
+          --name sqlserver
+          -d
+        )
+
+        if [ "${{ inputs.enable-full-text-search }}" = "true" ]; then
+          echo "Starting SQL Server container in setup mode for Full-Text Search installation..."
+          docker run "${base_run_args[@]}" --entrypoint /bin/bash "$image" -lc "sleep infinity"
+        else
+          echo "Starting SQL Server in a Docker container..."
+          docker run "${base_run_args[@]}" "$image"
+        fi
 
         if [ "${{ inputs.enable-full-text-search }}" = "true" ]; then
           echo "Installing Full-Text Search support in the SQL Server container..."
@@ -121,6 +133,9 @@ runs:
             apt-get clean
             rm -rf /var/lib/apt/lists/*
           '
+
+          echo "Starting SQL Server process..."
+          docker exec -d sqlserver /opt/mssql/bin/sqlservr
         fi
 
         echo "Creating `sqlcmd` bash script to forward commands via docker exec"
