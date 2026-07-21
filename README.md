@@ -47,6 +47,18 @@ steps:
       extra-params: "Max Pool Size=100;"
 ```
 
+To enable SQL Server Full-Text Search:
+
+```yaml
+steps:
+  - name: Install SQL Server
+    uses: Particular/install-sql-server-action@v1.4.0 # Check if this is the latest version at https://github.com/Particular/install-sql-server-action/tags
+    with:
+      connection-string-env-var: SQL_SERVER_CONNECTION_STRING
+      catalog: nservicebus
+      enable-full-text-search: "true"
+```
+
 ## Parameters
 
 | Parameter | Required | Default | Description |
@@ -56,6 +68,9 @@ steps:
 | `collation` | No | `SQL_Latin1_General_CP1_CS_AS` | The collation to use for the SQL Server database. Override to any available [SQL collation](https://learn.microsoft.com/en-us/sql/relational-databases/collations/collation-and-unicode-support). |
 | `sqlserver-version` | No | `2022` | The SQL server major version to use. |
 | `extra-params` | No | - | Extra parameters to be appended to the end of the connection string. |
+| `enable-full-text-search` | No | `"false"` | When set to `"true"`, the action installs/enables and verifies SQL Server Full-Text Search before completion. |
+
+When `enable-full-text-search` is enabled, setup time may increase because extra SQL components/packages are installed.
 
 ## Using `sqlcmd`
 

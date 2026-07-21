@@ -19,6 +19,10 @@ inputs:
   extra-params:
     description: Extra parameters to add to the connection string
     required: false
+  enable-full-text-search:
+    description: Enable SQL Server Full-Text Search installation/verification
+    required: false
+    default: "false"
 runs:
   using: "composite"
   steps:
@@ -27,6 +31,8 @@ runs:
       shell: pwsh
       run: |
         # Windows SQL install via Chocolatey
+        $enableFts = '${{ inputs.enable-full-text-search }}' -eq 'true'
+
         $template = @'
         {[string]Package*:sql-server-express}|{[int]Major:2022}.{[int]Minor:16}.{[int]Patch:0}.{[int]Build:1000}
         {[string]Package*:sql-server-express}|{[int]Major:2022}.{[int]Minor:16}.{[int]Patch:0}.{[int]Build:0}
@@ -39,13 +45,21 @@ runs:
         $sortedVersions = $availableVersions | ConvertFrom-String -TemplateContent $template -IncludeExtent | Sort-Object -Property Major -Descending
         $newestVersion = $sortedVersions[0].ExtentText.Split("|")[1]
 
+        $installArgs = @('install', 'sql-server-express', '-y', '--no-progress')
+
         if ($newestVersion) {
+            $installArgs += @('--version', $newestVersion)
             Write-Output "Installing SQL Server Express version $newestVersion with Chocolatey..."
-            choco install sql-server-express --version $newestVersion -y --no-progress
         } else {
             Write-Output "No versions found matching the prefix '${{ inputs.sqlserver-version }}'. Installing latest with Chocolatey..."
-            choco install sql-server-express --no-progress
         }
+
+        if ($enableFts) {
+            Write-Output "Full-Text Search requested, adding SQL setup features..."
+            $installArgs += @('--package-parameters', "'/FEATURES=SQLEngine,FullText'")
+        }
+
+        choco @installArgs
 
         Write-Output "Setting environment variables for sqlcmd..."
         Write-Output "SQLCMDSERVER=.\SQLEXPRESS" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
@@ -72,6 +86,17 @@ runs:
                    -e "SQLCMDPASSWORD=$sa_pw" \
                    -p 1433:1433 --name sqlserver -d mcr.microsoft.com/mssql/server:${{ inputs.sqlserver-version }}-latest
 
+        if [ "${{ inputs.enable-full-text-search }}" = "true" ]; then
+          echo "Installing Full-Text Search support in the SQL Server container..."
+          docker exec -u 0 sqlserver bash -lc '
+            set -euo pipefail
+            apt-get update
+            ACCEPT_EULA=Y apt-get install -y mssql-server-fts
+            apt-get clean
+            rm -rf /var/lib/apt/lists/*
+          '
+        fi
+
         echo "Creating `sqlcmd` bash script to forward commands via docker exec"
         mkdir -p ~/bin
         cat << 'EOF' > ~/bin/sqlcmd
@@ -91,6 +116,7 @@ runs:
       shell: pwsh
       run: |
         # Wait for availability then create initial catalog
+        $enableFts = '${{ inputs.enable-full-text-search }}' -eq 'true'
 
         for ($i = 1; $i -le 30; $i++) {
           Write-Output "Attempt $i/30 to connect to SQL Server..."
@@ -101,6 +127,14 @@ runs:
           } else {
             Write-Output "  - Not ready, sleeping for 5s"
             Start-Sleep -seconds 5
+          }
+        }
+
+        if ($enableFts) {
+          Write-Output "Verifying Full-Text Search availability..."
+          $ftsInstalled = (sqlcmd -h -1 -W -Q "SET NOCOUNT ON; SELECT FULLTEXTSERVICEPROPERTY('IsFullTextInstalled');").Trim()
+          if ($LASTEXITCODE -ne 0 -or $ftsInstalled -ne '1') {
+            throw "Full-Text Search was requested but is not available."
           }
         }
 
