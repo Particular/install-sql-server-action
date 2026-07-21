@@ -72,7 +72,7 @@ steps:
 
 When `enable-full-text-search` is enabled, setup time may increase because extra SQL components/packages are installed.
 On Windows, this switches installation to Chocolatey's `sql-server-express-adv` package so Full-Text Search is available.
-On Linux, the action adds the matching Microsoft SQL Server apt feed and installs `mssql-server-fts` for the detected SQL Server engine major version.
+On Linux, the action adds the matching Microsoft SQL Server apt feed and installs `mssql-server-fts` for the requested SQL Server major version.
 
 ## Using `sqlcmd`
 
