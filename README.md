@@ -71,6 +71,7 @@ steps:
 | `enable-full-text-search` | No | `"false"` | When set to `"true"`, the action installs/enables and verifies SQL Server Full-Text Search before completion. |
 
 When `enable-full-text-search` is enabled, setup time may increase because extra SQL components/packages are installed.
+On Windows, this switches installation to Chocolatey's `sql-server-express-advanced` package so Full-Text Search is available.
 
 ## Using `sqlcmd`
 

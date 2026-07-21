@@ -32,31 +32,22 @@ runs:
       run: |
         # Windows SQL install via Chocolatey
         $enableFts = '${{ inputs.enable-full-text-search }}' -eq 'true'
+        $packageName = if ($enableFts) { 'sql-server-express-advanced' } else { 'sql-server-express' }
 
-        $template = @'
-        {[string]Package*:sql-server-express}|{[int]Major:2022}.{[int]Minor:16}.{[int]Patch:0}.{[int]Build:1000}
-        {[string]Package*:sql-server-express}|{[int]Major:2022}.{[int]Minor:16}.{[int]Patch:0}.{[int]Build:0}
-        {[string]Package*:sql-server-express}|{[int]Major:14}.{[int]Minor:1801}.{[int]Patch:3958}.{[int]Build:1}
-        '@
+        # Limited output is package|version
+        $newestVersion = choco search $packageName --exact --all-versions --limit-output `
+          | ForEach-Object { ($_ -split '\|')[1] } `
+          | Where-Object { $_ -like "${{ inputs.sqlserver-version }}*" } `
+          | Sort-Object { [version](($_ -split '-')[0]) } -Descending `
+          | Select-Object -First 1
 
-        # Limited output should be sql-server-express|versionstring
-        $availableVersions = choco search sql-server-express --exact --all-versions --limit-output | Where-Object { $_ -like "*${{ inputs.sqlserver-version }}**" }
-        # IncludeExtent will feed the input into an ExtendText property. Using the template examples helps to order by Major which is all we are interested in
-        $sortedVersions = $availableVersions | ConvertFrom-String -TemplateContent $template -IncludeExtent | Sort-Object -Property Major -Descending
-        $newestVersion = $sortedVersions[0].ExtentText.Split("|")[1]
-
-        $installArgs = @('install', 'sql-server-express', '-y', '--no-progress')
+        $installArgs = @('install', $packageName, '-y', '--no-progress')
 
         if ($newestVersion) {
             $installArgs += @('--version', $newestVersion)
-            Write-Output "Installing SQL Server Express version $newestVersion with Chocolatey..."
+            Write-Output "Installing $packageName version $newestVersion with Chocolatey..."
         } else {
-            Write-Output "No versions found matching the prefix '${{ inputs.sqlserver-version }}'. Installing latest with Chocolatey..."
-        }
-
-        if ($enableFts) {
-            Write-Output "Full-Text Search requested, adding SQL setup features..."
-            $installArgs += @('--package-parameters', "'/FEATURES=SQLEngine,FullText'")
+            Write-Output "No versions found matching the prefix '${{ inputs.sqlserver-version }}'. Installing latest $packageName with Chocolatey..."
         }
 
         choco @installArgs
