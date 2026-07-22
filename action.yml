@@ -20,7 +20,7 @@ inputs:
     description: Extra parameters to add to the connection string
     required: false
   enable-full-text-search:
-    description: Enable SQL Server Full-Text Search installation/verification
+    description: Enable SQL Server Full-Text Search installation
     required: false
     default: "false"
 runs:
@@ -91,10 +91,11 @@ runs:
 
         if [ "${{ inputs.enable-full-text-search }}" = "true" ]; then
           case "${{ inputs.sqlserver-version }}" in
+            2025*) sql_engine_major=17; repo_channel=2025 ;;
             2022*) sql_engine_major=16; repo_channel=2022 ;;
             2019*) sql_engine_major=15; repo_channel=2019 ;;
             *)
-              echo "Unsupported sqlserver-version for FTS: '${{ inputs.sqlserver-version }}'. Supported values: 2019, 2022." >&2
+              echo "Unsupported sqlserver-version for FTS: '${{ inputs.sqlserver-version }}'. Supported values: 2019, 2022, 2025." >&2
               exit 1
               ;;
           esac
