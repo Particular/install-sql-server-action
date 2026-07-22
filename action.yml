@@ -19,6 +19,10 @@ inputs:
   extra-params:
     description: Extra parameters to add to the connection string
     required: false
+  enable-full-text-search:
+    description: Enable SQL Server Full-Text Search installation
+    required: false
+    default: "false"
 runs:
   using: "composite"
   steps:
@@ -27,25 +31,26 @@ runs:
       shell: pwsh
       run: |
         # Windows SQL install via Chocolatey
-        $template = @'
-        {[string]Package*:sql-server-express}|{[int]Major:2022}.{[int]Minor:16}.{[int]Patch:0}.{[int]Build:1000}
-        {[string]Package*:sql-server-express}|{[int]Major:2022}.{[int]Minor:16}.{[int]Patch:0}.{[int]Build:0}
-        {[string]Package*:sql-server-express}|{[int]Major:14}.{[int]Minor:1801}.{[int]Patch:3958}.{[int]Build:1}
-        '@
+        $enableFts = '${{ inputs.enable-full-text-search }}' -eq 'true'
+        $packageName = if ($enableFts) { 'sql-server-express-adv' } else { 'sql-server-express' }
 
-        # Limited output should be sql-server-express|versionstring
-        $availableVersions = choco search sql-server-express --exact --all-versions --limit-output | Where-Object { $_ -like "*${{ inputs.sqlserver-version }}**" }
-        # IncludeExtent will feed the input into an ExtendText property. Using the template examples helps to order by Major which is all we are interested in
-        $sortedVersions = $availableVersions | ConvertFrom-String -TemplateContent $template -IncludeExtent | Sort-Object -Property Major -Descending
-        $newestVersion = $sortedVersions[0].ExtentText.Split("|")[1]
+        # Limited output is package|version
+        $newestVersion = choco search $packageName --exact --all-versions --limit-output `
+          | ForEach-Object { ($_ -split '\|')[1] } `
+          | Where-Object { $_ -like "${{ inputs.sqlserver-version }}*" } `
+          | Sort-Object { [version](($_ -split '-')[0]) } -Descending `
+          | Select-Object -First 1
+
+        $installArgs = @('install', $packageName, '-y', '--no-progress')
 
         if ($newestVersion) {
-            Write-Output "Installing SQL Server Express version $newestVersion with Chocolatey..."
-            choco install sql-server-express --version $newestVersion -y --no-progress
+            $installArgs += @('--version', $newestVersion)
+            Write-Output "Installing $packageName version $newestVersion with Chocolatey..."
         } else {
-            Write-Output "No versions found matching the prefix '${{ inputs.sqlserver-version }}'. Installing latest with Chocolatey..."
-            choco install sql-server-express --no-progress
+            Write-Output "No versions found matching the prefix '${{ inputs.sqlserver-version }}'. Installing latest $packageName with Chocolatey..."
         }
+
+        choco @installArgs
 
         Write-Output "Setting environment variables for sqlcmd..."
         Write-Output "SQLCMDSERVER=.\SQLEXPRESS" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
@@ -62,15 +67,71 @@ runs:
         sa_pw=$(uuidgen)
         echo "::add-mask::$sa_pw"
 
-        echo "Starting SQL Server in a Docker container..."
-        docker run -e "ACCEPT_EULA=Y" \
-                   -e "SA_PASSWORD=$sa_pw" \
-                   -e "MSSQL_PID=Developer" \
-                   -e "MSSQL_COLLATION=${{ inputs.collation }}" \
-                   -e "SQLCMDSERVER=localhost" \
-                   -e "SQLCMDUSER=sa" \
-                   -e "SQLCMDPASSWORD=$sa_pw" \
-                   -p 1433:1433 --name sqlserver -d mcr.microsoft.com/mssql/server:${{ inputs.sqlserver-version }}-latest
+        image="mcr.microsoft.com/mssql/server:${{ inputs.sqlserver-version }}-latest"
+        base_run_args=(
+          -e "ACCEPT_EULA=Y"
+          -e "SA_PASSWORD=$sa_pw"
+          -e "MSSQL_PID=Developer"
+          -e "MSSQL_COLLATION=${{ inputs.collation }}"
+          -e "SQLCMDSERVER=localhost"
+          -e "SQLCMDUSER=sa"
+          -e "SQLCMDPASSWORD=$sa_pw"
+          -p 1433:1433
+          --name sqlserver
+          -d
+        )
+
+        if [ "${{ inputs.enable-full-text-search }}" = "true" ]; then
+          echo "Starting SQL Server container in setup mode for Full-Text Search installation..."
+          docker run "${base_run_args[@]}" --entrypoint /bin/bash "$image" -lc "sleep infinity"
+        else
+          echo "Starting SQL Server in a Docker container..."
+          docker run "${base_run_args[@]}" "$image"
+        fi
+
+        if [ "${{ inputs.enable-full-text-search }}" = "true" ]; then
+          case "${{ inputs.sqlserver-version }}" in
+            2025*) sql_engine_major=17; repo_channel=2025 ;;
+            2022*) sql_engine_major=16; repo_channel=2022 ;;
+            2019*) sql_engine_major=15; repo_channel=2019 ;;
+            *)
+              echo "Unsupported sqlserver-version for FTS: '${{ inputs.sqlserver-version }}'. Supported values: 2019, 2022, 2025." >&2
+              exit 1
+              ;;
+          esac
+
+          echo "Installing Full-Text Search support in the SQL Server container..."
+          docker exec -u 0 sqlserver bash -lc "
+            set -euo pipefail
+            apt-get update
+            ACCEPT_EULA=Y apt-get install -y --no-install-recommends curl gnupg
+
+            . /etc/os-release
+            curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+              | gpg --dearmor > /usr/share/keyrings/microsoft-prod.gpg
+            echo \"deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/\${VERSION_ID}/mssql-server-${repo_channel} \${VERSION_CODENAME} main\" \
+              > /etc/apt/sources.list.d/mssql-server.list
+
+            apt-get update
+
+            fts_version=\$(apt-cache madison mssql-server-fts \
+              | awk '{print \$3}' \
+              | grep -E '^${sql_engine_major}\.' \
+              | head -n 1)
+
+            if [ -z \"\${fts_version}\" ]; then
+              echo \"No mssql-server-fts package found for SQL Server engine major ${sql_engine_major}.\" >&2
+              exit 1
+            fi
+
+            ACCEPT_EULA=Y apt-get install -y --no-install-recommends \"mssql-server-fts=\${fts_version}\"
+            apt-get clean
+            rm -rf /var/lib/apt/lists/*
+          "
+
+          echo "Starting SQL Server process..."
+          docker exec -d sqlserver /opt/mssql/bin/sqlservr
+        fi
 
         echo "Creating `sqlcmd` bash script to forward commands via docker exec"
         mkdir -p ~/bin
@@ -91,6 +152,7 @@ runs:
       shell: pwsh
       run: |
         # Wait for availability then create initial catalog
+        $enableFts = '${{ inputs.enable-full-text-search }}' -eq 'true'
 
         for ($i = 1; $i -le 30; $i++) {
           Write-Output "Attempt $i/30 to connect to SQL Server..."
@@ -101,6 +163,14 @@ runs:
           } else {
             Write-Output "  - Not ready, sleeping for 5s"
             Start-Sleep -seconds 5
+          }
+        }
+
+        if ($enableFts) {
+          Write-Output "Verifying Full-Text Search availability..."
+          $ftsInstalled = (sqlcmd -h -1 -W -Q "SET NOCOUNT ON; SELECT FULLTEXTSERVICEPROPERTY('IsFullTextInstalled');").Trim()
+          if ($LASTEXITCODE -ne 0 -or $ftsInstalled -ne '1') {
+            throw "Full-Text Search was requested but is not available."
           }
         }
 
