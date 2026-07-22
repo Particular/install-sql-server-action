@@ -46,10 +46,18 @@ jobs:
           echo $result
   ci-full-text-search:
     runs-on: ${{ matrix.os }}
-    name: ${{ matrix.name }}-SQL Server 2022-FTS
+    name: ${{ matrix.name }}-${{ matrix.sqlserver.label }}-FTS
     strategy:
       fail-fast: false
       matrix:
+        os: [windows-latest, ubuntu-latest]
+        sqlserver:
+          - label: 'SQL Server 2025'
+            version: '2025'
+          - label: 'SQL Server 2022'
+            version: '2022'
+          - label: 'SQL Server 2019'  
+            version: '2019'
         include:
           - os: windows-latest
             name: Windows
@@ -63,7 +71,7 @@ jobs:
         with:
           connection-string-env-var: SQL_CONN_STR
           catalog: my-test-catalog
-          sqlserver-version: "2022"
+          sqlserver-version: ${{ matrix.sqlserver.version }}
           enable-full-text-search: "true"
       - name: Check FTS result
         shell: pwsh
