@@ -432,15 +432,18 @@ runs:
         # fail loudly if SQL Server never comes up, so a slow/failed start surfaces here with a
         # clear message instead of later in consumer steps as a confusing "server not found". The
         # catalog creation is idempotent (skips if the database already exists) and retries through
-        # transient failures -- a freshly-started instance can deadlock on CREATE DATABASE
-        # (Msg 1205) while it is still settling, which clears on the next attempt.
+        # transient failures. A freshly-started instance can deadlock on CREATE DATABASE
+        # (Msg 1205, returned immediately) or block on a lock while settling (no deadlock cycle,
+        # waits forever by default). A -t 30 query timeout bounds each attempt so a blocked
+        # CREATE DATABASE aborts after 30s instead of hanging the job for minutes; the retry
+        # then succeeds once the instance has settled.
         $enableFts = '${{ inputs.enable-full-text-search }}' -eq 'true'
         $catalog = '${{ inputs.catalog }}'
 
         $ready = $false
         for ($i = 1; $i -le 30; $i++) {
           Write-Output "Attempt $i/30 to connect to SQL Server..."
-          sqlcmd -b -Q "SELECT @@SERVERNAME as ServerName" 2>&1>$null
+          sqlcmd -b -t 30 -Q "SELECT @@SERVERNAME as ServerName" 2>&1>$null
           if ($?) {
             Write-Output "  - SQL Server is now ready"
             $ready = $true
@@ -455,7 +458,7 @@ runs:
 
         if ($enableFts) {
           Write-Output "Verifying Full-Text Search availability..."
-          $ftsInstalled = (sqlcmd -h -1 -W -Q "SET NOCOUNT ON; SELECT FULLTEXTSERVICEPROPERTY('IsFullTextInstalled');").Trim()
+          $ftsInstalled = (sqlcmd -h -1 -W -t 30 -Q "SET NOCOUNT ON; SELECT FULLTEXTSERVICEPROPERTY('IsFullTextInstalled');").Trim()
           if ($LASTEXITCODE -ne 0 -or $ftsInstalled -ne '1') {
             throw "Full-Text Search was requested but is not available."
           }
@@ -464,7 +467,7 @@ runs:
         Write-Output "Creating initial catalog '$catalog'"
         $catalogReady = $false
         for ($i = 1; $i -le 10; $i++) {
-          sqlcmd -b -Q "IF DB_ID('$catalog') IS NULL CREATE DATABASE [$catalog]" 2>&1>$null
+          sqlcmd -b -t 30 -Q "IF DB_ID('$catalog') IS NULL CREATE DATABASE [$catalog]" 2>&1>$null
           if ($?) { $catalogReady = $true; break }
           Write-Output "  - Catalog not yet created (attempt $i/10), sleeping for 5s"
           Start-Sleep -seconds 5
