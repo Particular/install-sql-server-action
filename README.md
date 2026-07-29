@@ -96,6 +96,12 @@ On Windows the ports are published inside the WSL2 VM and are reachable from the
 
 Because the previous Windows path ran a native SQL Server Express instance on the same host, distributed transactions were coordinated by the **local** DTC and worked without any configuration. Running SQL Server in a WSL2 container turns those into **network** transactions, so on Windows the action additionally configures the host's Local DTC when this input is set: it enables Network DTC Access (inbound and outbound), sets the authentication level to **No Authentication Required** (the Linux container's MSDTC does not authenticate RPC), allows the Distributed Transaction Coordinator through Windows Firewall, sets the container's hostname to `sqlserver`, and adds a Windows hosts file entry mapping that name to the WSL2 IP. The hostname mapping is necessary because the container's DTC advertises its hostname in its transaction "whereabouts" — without a resolvable name the host DTC cannot push the transaction (see [mssql-docker#492](https://github.com/microsoft/mssql-docker/issues/492)). This restores the previous "it just works" behavior for consumers' distributed-transaction tests.
 
+> [!NOTE]
+> **.NET 7+ opt-in:** Since .NET 7, `TransactionManager.ImplicitDistributedTransactions` defaults to `false`, meaning `TransactionScope` escalation to MSDTC throws `NotSupportedException` unless the application explicitly sets `TransactionManager.ImplicitDistributedTransactions = true` at startup. This is a per-process setting the action cannot set for consumers. If your tests use distributed transactions, add this one line to your test setup:
+> ```csharp
+> TransactionManager.ImplicitDistributedTransactions = true;
+> ```
+
 ## Connection string
 
 The generated connection string uses SQL authentication (`User Id=sa;Password=...;Encrypt=false;`):
