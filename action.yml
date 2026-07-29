@@ -475,3 +475,20 @@ runs:
         if (-not $catalogReady) {
           throw "Failed to create initial catalog '$catalog'; SQL Server may not be accepting connections."
         }
+
+        # Gate the action on SQL Server being stably responsive, not just on having created the
+        # catalog once. A freshly-started instance (notably 2025) can be briefly slow to complete
+        # logins while it finishes background initialization -- enough to time out a consumer's
+        # default 15s login timeout even though the catalog was created moments earlier. Retry a
+        # fresh login+query against the catalog until it responds promptly, so consumers don't
+        # hit that transient.
+        $confirmed = $false
+        for ($i = 1; $i -le 10; $i++) {
+          sqlcmd -b -Q "SET NOCOUNT ON; SELECT DB_NAME() AS CatalogName" -d $catalog 2>&1>$null
+          if ($?) { $confirmed = $true; break }
+          Write-Output "  - SQL Server not yet responsive (attempt $i/10), sleeping for 5s"
+          Start-Sleep -seconds 5
+        }
+        if (-not $confirmed) {
+          throw "Initial catalog '$catalog' created but SQL Server is not responding to logins within the login timeout."
+        }
