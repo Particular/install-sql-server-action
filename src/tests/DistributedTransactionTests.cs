@@ -25,6 +25,11 @@ public class DistributedTransactionTests
     [Test]
     public void Should_commit_a_distributed_transaction()
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Ignore("Distributed transactions (MSDTC) are only supported on Windows.");
+        }
+
         // .NET requires explicit opt-in for distributed transactions (MSDTC promotion), since they
         // carry security/availability risk. Enable it so enlisting a second durable RM escalates the
         // TransactionScope to a full MSDTC-coordinated transaction. If the host's MSDTC (coordinator)
