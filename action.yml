@@ -69,12 +69,10 @@ runs:
         }
 
         if ($enableDtc) {
-            # With SQL Server now running in a Linux container inside WSL, what used to be a
-            # *local* DTC transaction (native SQL Express on the same host) becomes a *network*
-            # transaction (host <-> WSL VM). Network DTC Access must therefore be enabled on the
-            # host, and because the Linux container's MSDTC does not authenticate RPC, the host
-            # must use "No Authentication Required". Without this, distributed transactions that
-            # used to work via the local DTC would fail after the switch to a container.
+            # SQL Server now runs in a container inside WSL, so a local DTC transaction becomes a
+            # network one (host <-> WSL VM). The host needs Network DTC Access, and since the
+            # container's MSDTC doesn't authenticate RPC it has to be "No Authentication Required"
+            # -- otherwise the distributed transactions that worked against local SQL Express break.
             Write-Output "::group::Configuring host Local DTC for distributed transactions"
 
             $dtcService = Get-Service -Name MSDTC -ErrorAction SilentlyContinue
@@ -89,10 +87,9 @@ runs:
             }
 
             Write-Output "Enabling Network DTC Access (inbound + outbound) with No Authentication"
-            # Configure Local DTC directly in the registry. Set-DtcNetworkSetting throws a
-            # NullReferenceException in this headless environment (the MsDtc CIM provider is not
-            # ready right after the service starts); these are the same values it would write and
-            # the service is restarted below so they take effect.
+            # Configure Local DTC straight in the registry -- Set-DtcNetworkSetting throws a
+            # NullReferenceException here because the MsDtc CIM provider isn't ready right after
+            # the service starts. Same values the cmdlet would write; the restart below applies them.
             # See https://learn.microsoft.com/troubleshoot/windows/win32/new-functionality-in-msdtc-service
             $securityPath = "HKLM:\SOFTWARE\Microsoft\MSDTC\Security"
             $msdtcPath = "HKLM:\SOFTWARE\Microsoft\MSDTC"
@@ -113,7 +110,7 @@ runs:
                 Set-ItemProperty -Path $securityPath -Name $name -Value $networkAccess[$name] -Type DWord
             }
 
-            # "No Authentication Required" (the container's MSDTC does not authenticate RPC).
+            # "No Authentication Required" -- the container's MSDTC doesn't authenticate RPC.
             $noAuthentication = @{
                 AllowOnlySecureRpcCalls          = 0
                 FallbackToUnsecureRPCIfNecessary = 0
@@ -205,8 +202,8 @@ runs:
 
         if ($enableDtc) {
             Write-Output "Enabling distributed transactions (MSDTC) in the container"
-            # SQL Server 2019+ containers run as a non-root user and cannot bind to the privileged
-            # RPC port 135, so the endpoint mapper listens on 13500 and Docker maps host 135 to it.
+            # SQL Server 2019+ containers run as non-root and can't bind the privileged port 135,
+            # so the endpoint mapper listens on 13500 and Docker maps host 135 -> 13500.
             # See https://learn.microsoft.com/sql/linux/containers/configure-distributed-transactions
             $dockerArgs += @(
                 "-e", "MSSQL_RPC_PORT=13500",
@@ -242,12 +239,12 @@ runs:
                 }
             }
 
-            # The FTS install script is assembled from single-quoted lines and then base64-encoded
-            # before being sent to the container. Encoding is essential: the script is forwarded
-            # through PowerShell -> wsl.exe -> docker exec -> bash, and the WSL interop mangles the
-            # embedded double quotes in the `echo "deb ..."` line, which writes a malformed apt
-            # sources list and breaks `apt-get update`. Base64 carries only [A-Za-z0-9+/=], so it
-            # transits every layer unchanged. __CHANNEL__/__ENGINE__ are filled in before encoding.
+            # Build the FTS install script from single-quoted lines, then base64-encode it before
+            # sending it over. The encoding matters: the script hops through PowerShell -> wsl.exe
+            # -> docker exec -> bash, and the WSL interop mangles the double quotes in
+            # `echo "deb ..."`, which then writes a malformed apt sources list and breaks
+            # apt-get update. Base64 is just [A-Za-z0-9+/=], so it survives every hop untouched.
+            # __CHANNEL__/__ENGINE__ are filled in first.
             $ftsLines = @(
                 'set -euo pipefail'
                 'rm -f /etc/apt/sources.list.d/mssql-server.list'
@@ -347,8 +344,8 @@ runs:
 
         if [ "${{ inputs.enable-distributed-transactions }}" = "true" ]; then
           echo "Enabling distributed transactions (MSDTC) in the container"
-          # SQL Server 2019+ containers run as a non-root user and cannot bind to the privileged
-          # RPC port 135, so the endpoint mapper listens on 13500 and Docker maps host 135 to it.
+          # SQL Server 2019+ containers run as non-root and can't bind the privileged port 135,
+          # so the endpoint mapper listens on 13500 and Docker maps host 135 -> 13500.
           # See https://learn.microsoft.com/sql/linux/containers/configure-distributed-transactions
           base_run_args+=(
             -e "MSSQL_RPC_PORT=13500"
@@ -428,15 +425,15 @@ runs:
     - name: Setup server
       shell: pwsh
       run: |
-        # Wait for SQL Server to become available, then create the initial catalog. Both steps
-        # fail loudly if SQL Server never comes up, so a slow/failed start surfaces here with a
-        # clear message instead of later in consumer steps as a confusing "server not found". The
-        # catalog creation is idempotent (skips if the database already exists) and retries through
-        # transient failures. A freshly-started instance can deadlock on CREATE DATABASE
-        # (Msg 1205, returned immediately) or block on a lock while settling (no deadlock cycle,
-        # waits forever by default). A -t 30 query timeout bounds each attempt so a blocked
-        # CREATE DATABASE aborts after 30s instead of hanging the job for minutes; the retry
-        # then succeeds once the instance has settled.
+        # Wait for SQL Server to come up, then create the catalog. Both steps throw if it never
+        # gets there, so a slow/failed start fails here with a real message instead of surfacing
+        # later in consumer steps as a baffling "server not found".
+        #
+        # Creating the catalog is idempotent (no-op if it already exists) and retries past
+        # transient hiccups. A fresh instance can deadlock on CREATE DATABASE (Msg 1205, which
+        # comes back fast) or just block on a lock while settling (no deadlock, so it waits
+        # forever by default). The -t 30 query timeout caps each attempt at 30s, so a blocked
+        # CREATE DATABASE gives up and gets retried instead of hanging the job for minutes.
         $enableFts = '${{ inputs.enable-full-text-search }}' -eq 'true'
         $catalog = '${{ inputs.catalog }}'
 
@@ -476,12 +473,11 @@ runs:
           throw "Failed to create initial catalog '$catalog'; SQL Server may not be accepting connections."
         }
 
-        # Gate the action on SQL Server being stably responsive, not just on having created the
-        # catalog once. A freshly-started instance (notably 2025) can be briefly slow to complete
-        # logins while it finishes background initialization -- enough to time out a consumer's
-        # default 15s login timeout even though the catalog was created moments earlier. Retry a
-        # fresh login+query against the catalog until it responds promptly, so consumers don't
-        # hit that transient.
+        # Don't declare victory just because the catalog got created once. A fresh instance --
+        # 2025 is the usual suspect -- can be briefly slow to finish logins while background
+        # initialization wraps up, enough to blow a consumer's default 15s login timeout even
+        # though we made the catalog seconds ago. Keep opening fresh logins against the catalog
+        # until one answers promptly, so consumers don't trip over that warm-up window.
         $confirmed = $false
         for ($i = 1; $i -le 10; $i++) {
           sqlcmd -b -Q "SET NOCOUNT ON; SELECT DB_NAME() AS CatalogName" -d $catalog 2>&1>$null
