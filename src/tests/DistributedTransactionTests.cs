@@ -33,9 +33,9 @@ public class DistributedTransactionTests
         // .NET requires explicit opt-in for distributed transactions (MSDTC promotion), since they
         // carry security/availability risk. Enable it so enlisting a second durable RM escalates the
         // TransactionScope to a full MSDTC-coordinated transaction. If the host's MSDTC (coordinator)
-        // and the container's SQL Server MSDTC can't coordinate across the WSL2 boundary, Complete/
-        // Dispose throws -- the classic 0x8004D02B "communication problems" error. This mirrors the
-        // NServiceBus SqlServer transport's own startup self-check (FakePromotableResourceManager.ForceDtc).
+        // and the container's SQL Server MSDTC can't coordinate across the WSL2 boundary, the enlist
+        // or Complete/Dispose throws -- a 0x8004D02A/D02B "communication problems" error. This mirrors
+        // the NServiceBus SqlServer transport's own startup self-check (FakePromotableResourceManager.ForceDtc).
         TransactionManager.ImplicitDistributedTransactions = true;
 
         using var scope = new TransactionScope(
