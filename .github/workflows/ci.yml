@@ -81,10 +81,9 @@ jobs:
 
           sqlcmd -b -Q "IF FULLTEXTSERVICEPROPERTY('IsFullTextInstalled') <> 1 THROW 50001, 'Full-Text Search is not installed.', 1;"
 
-          # Exercise FTS on a single line. The Windows sqlcmd wrapper is a .cmd shim (no
-          # multi-line args), and the Linux wrapper forwards to the in-container sqlcmd, which
-          # can't read host-side files -- so `sqlcmd -i <file>` is out. A one-liner -Q works
-          # for both.
+          # FTS check as a one-liner -Q: the Windows sqlcmd wrapper is a .cmd shim (no multi-line
+          # args), and the Linux wrapper forwards to the in-container sqlcmd, which can't read
+          # host-side files. `sqlcmd -i <file>` and multi-line args are both out.
           sqlcmd -b -Q "USE [my-test-catalog]; CREATE TABLE dbo.FullTextSmoke (Id INT NOT NULL, Content NVARCHAR(200) NOT NULL); CREATE UNIQUE INDEX UX_FullTextSmoke_Id ON dbo.FullTextSmoke(Id); CREATE FULLTEXT CATALOG SmokeCatalog AS DEFAULT; CREATE FULLTEXT INDEX ON dbo.FullTextSmoke(Content LANGUAGE 1033) KEY INDEX UX_FullTextSmoke_Id;"
   ci-distributed-transactions:
     runs-on: ${{ matrix.os }}
