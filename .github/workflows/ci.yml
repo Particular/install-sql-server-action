@@ -158,3 +158,11 @@ jobs:
 
           $result = sqlcmd -Q "SELECT DB_NAME() as CatalogName" -d "my-test-catalog"
           echo $result
+      - name: Setup .NET SDK
+        if: runner.os == 'Windows'
+        uses: actions/setup-dotnet@v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Run DTC functional test
+        if: runner.os == 'Windows'
+        run: dotnet test src/tests/Tests.csproj --configuration Release --logger "GitHubActions"

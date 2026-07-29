@@ -122,8 +122,18 @@ runs:
             Write-Output "Restarting the MSDTC service to apply the registry changes"
             Restart-Service -Name MSDTC -Force
 
-            Write-Output "Allowing the Distributed Transaction Coordinator through Windows Firewall"
-            Enable-NetFirewallRule -DisplayGroup "Distributed Transaction Coordinator"
+            Write-Output "Allowing DTC + RPC through Windows Firewall (all profiles)"
+            # The container's SQL Server must call back to the host's DTC (the coordinator) over RPC:
+            # the host endpoint mapper (135) and the dynamic RPC port the host DTC listens on. The
+            # built-in DTC/RPC rules are Domain/Private only, but the WSL adapter sits on the Public
+            # profile, so widen them to all profiles or the container->host callback is dropped.
+            foreach ($group in @("Distributed Transaction Coordinator", "Remote Procedure Call (RPC)")) {
+                $rules = Get-NetFirewallRule -DisplayGroup $group -ErrorAction SilentlyContinue
+                if ($rules) {
+                    $rules | Set-NetFirewallRule -Profile Any -ErrorAction SilentlyContinue
+                    $rules | Enable-NetFirewallRule -ErrorAction SilentlyContinue
+                }
+            }
 
             Write-Output "::endgroup::"
         }
