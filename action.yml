@@ -198,7 +198,7 @@ runs:
             "run", "--name", $containerName, "--detach", "--restart", "unless-stopped",
             "--publish", "${port}:${port}",
             "-e", "ACCEPT_EULA=Y",
-            "-e", "SA_PASSWORD=$saPassword",
+            "-e", "MSSQL_SA_PASSWORD=$saPassword",
             "-e", "MSSQL_PID=Developer",
             "-e", "MSSQL_COLLATION=$collation"
         )
@@ -334,7 +334,7 @@ runs:
         image="mcr.microsoft.com/mssql/server:${{ inputs.sqlserver-version }}-latest"
         base_run_args=(
           -e "ACCEPT_EULA=Y"
-          -e "SA_PASSWORD=$sa_pw"
+          -e "MSSQL_SA_PASSWORD=$sa_pw"
           -e "MSSQL_PID=Developer"
           -e "MSSQL_COLLATION=${{ inputs.collation }}"
           -e "SQLCMDSERVER=localhost"
@@ -428,19 +428,29 @@ runs:
     - name: Setup server
       shell: pwsh
       run: |
-        # Wait for availability then create initial catalog
+        # Wait for SQL Server to become available, then create the initial catalog. Both steps
+        # fail loudly if SQL Server never comes up, so a slow/failed start surfaces here with a
+        # clear message instead of later in consumer steps as a confusing "server not found". The
+        # catalog creation is idempotent (skips if the database already exists) and retries through
+        # transient failures -- a freshly-started instance can deadlock on CREATE DATABASE
+        # (Msg 1205) while it is still settling, which clears on the next attempt.
         $enableFts = '${{ inputs.enable-full-text-search }}' -eq 'true'
+        $catalog = '${{ inputs.catalog }}'
 
+        $ready = $false
         for ($i = 1; $i -le 30; $i++) {
           Write-Output "Attempt $i/30 to connect to SQL Server..."
           sqlcmd -b -Q "SELECT @@SERVERNAME as ServerName" 2>&1>$null
           if ($?) {
             Write-Output "  - SQL Server is now ready"
+            $ready = $true
             break
-          } else {
-            Write-Output "  - Not ready, sleeping for 5s"
-            Start-Sleep -seconds 5
           }
+          Write-Output "  - Not ready, sleeping for 5s"
+          Start-Sleep -seconds 5
+        }
+        if (-not $ready) {
+          throw "SQL Server did not become ready within 150s."
         }
 
         if ($enableFts) {
@@ -451,5 +461,14 @@ runs:
           }
         }
 
-        Write-Output "Creating initial catalog '${{ inputs.catalog }}'"
-        sqlcmd -Q "CREATE DATABASE [${{ inputs.catalog }}]"
+        Write-Output "Creating initial catalog '$catalog'"
+        $catalogReady = $false
+        for ($i = 1; $i -le 10; $i++) {
+          sqlcmd -b -Q "IF DB_ID('$catalog') IS NULL CREATE DATABASE [$catalog]" 2>&1>$null
+          if ($?) { $catalogReady = $true; break }
+          Write-Output "  - Catalog not yet created (attempt $i/10), sleeping for 5s"
+          Start-Sleep -seconds 5
+        }
+        if (-not $catalogReady) {
+          throw "Failed to create initial catalog '$catalog'; SQL Server may not be accepting connections."
+        }
