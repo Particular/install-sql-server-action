@@ -80,8 +80,94 @@ jobs:
           Write-Host "Connection String: $connstr"
 
           sqlcmd -b -Q "IF FULLTEXTSERVICEPROPERTY('IsFullTextInstalled') <> 1 THROW 50001, 'Full-Text Search is not installed.', 1;"
-          sqlcmd -b -Q "USE [my-test-catalog];
-                        CREATE TABLE dbo.FullTextSmoke (Id INT NOT NULL, Content NVARCHAR(200) NOT NULL);
-                        CREATE UNIQUE INDEX UX_FullTextSmoke_Id ON dbo.FullTextSmoke(Id);
-                        CREATE FULLTEXT CATALOG SmokeCatalog AS DEFAULT;
-                        CREATE FULLTEXT INDEX ON dbo.FullTextSmoke(Content LANGUAGE 1033) KEY INDEX UX_FullTextSmoke_Id;"
+
+          # The FTS exercise is written to a file and run with `sqlcmd -i` so it works identically
+          # through the Linux in-container sqlcmd forwarding script and the Windows native sqlcmd
+          # wrapper (which forwards via a .cmd shim and therefore should not receive multi-line args).
+          @"
+          USE [my-test-catalog];
+          CREATE TABLE dbo.FullTextSmoke (Id INT NOT NULL, Content NVARCHAR(200) NOT NULL);
+          CREATE UNIQUE INDEX UX_FullTextSmoke_Id ON dbo.FullTextSmoke(Id);
+          CREATE FULLTEXT CATALOG SmokeCatalog AS DEFAULT;
+          CREATE FULLTEXT INDEX ON dbo.FullTextSmoke(Content LANGUAGE 1033) KEY INDEX UX_FullTextSmoke_Id;
+          "@ | Set-Content -Path fts-check.sql -Encoding utf8
+
+          sqlcmd -b -i fts-check.sql
+  ci-distributed-transactions:
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}-${{ matrix.sqlserver.label }}${{ matrix.fts && '-FTS' || '' }}-DTC
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        sqlserver:
+          - label: 'SQL Server 2022'
+            version: '2022'
+        fts: [false, true]
+        include:
+          - os: windows-latest
+            name: Windows
+          - os: ubuntu-latest
+            name: Linux
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Run with distributed transactions
+        uses: ./
+        with:
+          connection-string-env-var: SQL_CONN_STR
+          catalog: my-test-catalog
+          sqlserver-version: ${{ matrix.sqlserver.version }}
+          enable-distributed-transactions: "true"
+          enable-full-text-search: ${{ matrix.fts && 'true' || 'false' }}
+      - name: Verify DTC configuration
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Mirror the action's distribution resolution so the inspect commands reach the right WSL.
+          $distribution = $Env:WSL_DISTRIBUTION_OVERRIDE ?? 'Debian'
+
+          if ($Env:RUNNER_OS -eq 'Windows') {
+            $envJson  = (& wsl.exe --distribution $distribution -- docker inspect sqlserver --format '{{json .Config.Env}}') -join "`n"
+            $portOut  = (& wsl.exe --distribution $distribution -- docker port sqlserver) -join "`n"
+          } else {
+            $envJson  = docker inspect sqlserver --format '{{json .Config.Env}}'
+            $portOut  = docker port sqlserver
+          }
+
+          Write-Host "Container env:"
+          Write-Host $envJson
+          Write-Host "Published ports:"
+          Write-Host $portOut
+
+          if ($envJson -notmatch 'MSSQL_RPC_PORT=13500') {
+            throw "MSSQL_RPC_PORT=13500 is not configured in the container."
+          }
+          if ($envJson -notmatch 'MSSQL_DTC_TCP_PORT=51000') {
+            throw "MSSQL_DTC_TCP_PORT=51000 is not configured in the container."
+          }
+
+          # docker port lists "<container port>/tcp -> <host ip>:<host port>".
+          $portLines = ($portOut -split "`n") | ForEach-Object { $_.Trim() }
+          if (-not ($portLines | Where-Object { $_ -match '-> .*:135$' })) {
+            throw "RPC host port 135 is not published."
+          }
+          if (-not ($portLines | Where-Object { $_ -match '-> .*:51000$' })) {
+            throw "MSDTC host port 51000 is not published."
+          }
+
+          Write-Host "Distributed transaction (MSDTC) configuration verified."
+      - name: Check result
+        shell: pwsh
+        run: |
+          $connstr = $Env:SQL_CONN_STR
+          Write-Host "Connection String: $connstr"
+
+          $result = sqlcmd -Q "SELECT DB_NAME() as CatalogName" -d "my-test-catalog"
+          echo $result
+      - name: Check Full-Text Search (FTS + DTC combination)
+        if: matrix.fts
+        shell: pwsh
+        run: |
+          sqlcmd -b -Q "IF FULLTEXTSERVICEPROPERTY('IsFullTextInstalled') <> 1 THROW 50001, 'Full-Text Search is not installed.', 1;"

@@ -23,40 +23,260 @@ inputs:
     description: Enable SQL Server Full-Text Search installation
     required: false
     default: "false"
+  enable-distributed-transactions:
+    description: Enable SQL Server distributed transactions (MSDTC) in the container
+    required: false
+    default: "false"
 runs:
   using: "composite"
   steps:
-    - name: Install SQL Server (Windows)
+    - name: Start SQL Server (Windows)
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
-        # Windows SQL install via Chocolatey
-        $enableFts = '${{ inputs.enable-full-text-search }}' -eq 'true'
-        $packageName = if ($enableFts) { 'sql-server-express-adv' } else { 'sql-server-express' }
+        $ErrorActionPreference = 'Stop'
 
-        # Limited output is package|version
-        $newestVersion = choco search $packageName --exact --all-versions --limit-output `
-          | ForEach-Object { ($_ -split '\|')[1] } `
-          | Where-Object { $_ -like "${{ inputs.sqlserver-version }}*" } `
-          | Sort-Object { [version](($_ -split '-')[0]) } -Descending `
-          | Select-Object -First 1
+        $enableFts  = '${{ inputs.enable-full-text-search }}' -eq 'true'
+        $enableDtc  = '${{ inputs.enable-distributed-transactions }}' -eq 'true'
+        $version    = '${{ inputs.sqlserver-version }}'
+        $catalog    = '${{ inputs.catalog }}'
+        $collation  = '${{ inputs.collation }}'
+        $extraParams = '${{ inputs.extra-params }}'
+        $envVarName = '${{ inputs.connection-string-env-var }}'
 
-        $installArgs = @('install', $packageName, '-y', '--no-progress')
+        # SQL Server password policy requires chars from 3 of 4 sets. A hyphenated
+        # GUID (lowercase letters + digits + hyphens) satisfies this, matching the
+        # `uuidgen` based password used on Linux.
+        $saPassword = [guid]::NewGuid().ToString()
+        Write-Output "::add-mask::$saPassword"
 
-        if ($newestVersion) {
-            $installArgs += @('--version', $newestVersion)
-            Write-Output "Installing $packageName version $newestVersion with Chocolatey..."
-        } else {
-            Write-Output "No versions found matching the prefix '${{ inputs.sqlserver-version }}'. Installing latest $packageName with Chocolatey..."
+        $image = "mcr.microsoft.com/mssql/server:$version-latest"
+        $containerName = "sqlserver"
+        $port = 1433
+
+        function Invoke-Wsl {
+            param(
+                [Parameter(Mandatory = $true)][string]$Distribution,
+                [Parameter(Mandatory = $true)][string]$Command,
+                [switch]$CheckExitCode
+            )
+
+            wsl.exe --distribution $Distribution --user root -- bash -c $Command
+
+            if ($CheckExitCode -and $LASTEXITCODE -ne 0) {
+                throw "WSL command failed with exit code $LASTEXITCODE`: $Command"
+            }
         }
 
-        choco @installArgs
+        if ($enableDtc) {
+            # With SQL Server now running in a Linux container inside WSL, what used to be a
+            # *local* DTC transaction (native SQL Express on the same host) becomes a *network*
+            # transaction (host <-> WSL VM). Network DTC Access must therefore be enabled on the
+            # host, and because the Linux container's MSDTC does not authenticate RPC, the host
+            # must use "No Authentication Required". Without this, distributed transactions that
+            # used to work via the local DTC would fail after the switch to a container.
+            # See https://learn.microsoft.com/powershell/module/msdtc/set-dtcnetworksetting
+            Write-Output "::group::Configuring host Local DTC for distributed transactions"
 
-        Write-Output "Setting environment variables for sqlcmd..."
-        Write-Output "SQLCMDSERVER=.\SQLEXPRESS" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
+            $dtcService = Get-Service -Name MSDTC -ErrorAction SilentlyContinue
+            if ($dtcService) {
+                if ($dtcService.StartType -eq 'Disabled') {
+                    Set-Service -Name MSDTC -StartupType Manual
+                }
+                if ($dtcService.Status -ne 'Running') {
+                    Write-Output "Starting the MSDTC service"
+                    Start-Service -Name MSDTC
+                }
+            }
 
-        Write-Output "Setting environment variable ${{ inputs.connection-string-env-var }} to SQL connection string..."
-        Write-Output "${{ inputs.connection-string-env-var }}=Data Source=.\SQLEXPRESS;Initial Catalog=${{ inputs.catalog }};Integrated Security=True;Encrypt=false;${{ inputs.extra-params }}" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
+            Write-Output "Enabling Network DTC Access (inbound + outbound) with No Authentication"
+            # Set-DtcNetworkSetting restarts the Local DTC instance so the changes take effect.
+            Set-DtcNetworkSetting -DtcName Local `
+                -AuthenticationLevel NoAuth `
+                -InboundTransactionsEnabled $true `
+                -OutboundTransactionsEnabled $true `
+                -RemoteClientAccessEnabled $true `
+                -RemoteAdministrationAccessEnabled $true
+
+            Write-Output "Allowing the Distributed Transaction Coordinator through Windows Firewall"
+            Enable-NetFirewallRule -DisplayGroup "Distributed Transaction Coordinator"
+
+            Write-Output "::endgroup::"
+        }
+
+        Write-Output "Running SQL Server in container $containerName inside WSL"
+
+        $wslDistribution = $Env:WSL_DISTRIBUTION_OVERRIDE ?? "Debian"
+
+        # Constrain the WSL2 VM (memory) and keep it from being shut down when idle, so
+        # that Docker and the container are not torn down between this setup step and the
+        # later test steps. Only write when the file is absent so local development
+        # configurations are left untouched.
+        $wslConfigPath = Join-Path $Env:USERPROFILE ".wslconfig"
+        if (-not (Test-Path $wslConfigPath)) {
+            $wslMemory = $Env:WSL_MEMORY_OVERRIDE ?? "4GB"
+            Write-Output "Writing $wslConfigPath (memory=$wslMemory) to constrain the WSL2 VM"
+            Set-Content -Path $wslConfigPath -Value "[wsl2]`nmemory=$wslMemory`nvmIdleTimeout=-1" -Encoding ASCII
+        }
+
+        Write-Output "::group::Preparing WSL ($wslDistribution)"
+
+        wsl.exe --set-default-version 2 | Out-Null
+
+        # Install the distribution if it is not already registered.
+        $installedDistributions = ((wsl.exe --list --quiet) -replace "`0", "") |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -ne "" }
+
+        if ($installedDistributions -notcontains $wslDistribution) {
+            Write-Output "Installing $wslDistribution in WSL"
+            wsl.exe --install $wslDistribution --web-download --no-launch
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to install $wslDistribution in WSL"
+            }
+        }
+        else {
+            Write-Output "$wslDistribution is already installed"
+        }
+
+        # Ensure Docker is installed inside the WSL distribution.
+        Write-Output "Ensuring Docker is installed inside $wslDistribution"
+        Invoke-Wsl -Distribution $wslDistribution -CheckExitCode -Command "command -v docker >/dev/null 2>&1 || { apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --yes docker.io; }"
+
+        # Start the Docker daemon via systemd when available, otherwise via the SysV service.
+        Write-Output "Starting Docker daemon inside $wslDistribution"
+        Invoke-Wsl -Distribution $wslDistribution -CheckExitCode -Command "docker info >/dev/null 2>&1 || { if [ -d /run/systemd/system ]; then systemctl start docker; else service docker start; fi; }"
+
+        # Keep the WSL instance alive for the rest of the job. WSL terminates an instance when no
+        # processes remain under its init (PID 2); a plain background process (e.g. sleep) does not
+        # prevent this, but a D-Bus session bus launched through `wsl --exec` does. vmIdleTimeout
+        # above covers the VM-level idle timeout; this covers the separate instance-level shutdown.
+        # See https://github.com/microsoft/WSL/issues/10138 and
+        # https://blog.lecoteauverdoyant.co.uk/articles/wsl-keep-alive.html
+        Write-Output "Starting a D-Bus session to keep the WSL instance alive for the job"
+        # dbus-launch ships in the dbus-x11 package (not dbus). Verify it is present afterwards so a
+        # packaging change can never silently leave the instance unguarded again.
+        Invoke-Wsl -Distribution $wslDistribution -CheckExitCode -Command "command -v dbus-launch >/dev/null 2>&1 || { apt-get update && apt-get install -y dbus-x11; }; command -v dbus-launch >/dev/null 2>&1 || { echo 'dbus-launch is unavailable after installing dbus-x11' >&2; exit 1; }"
+        wsl.exe --distribution $wslDistribution --user root --exec /usr/bin/dbus-launch true
+        if ($LASTEXITCODE -ne 0) {
+            throw "dbus-launch keep-alive failed with exit code $LASTEXITCODE"
+        }
+
+        Write-Output "::endgroup::"
+
+        # Build the docker run arguments. Splatting an array keeps each value (incl. the SA password)
+        # as a distinct argument, so no shell quoting is required when forwarding through wsl.exe.
+        $dockerArgs = @(
+            "run", "--name", $containerName, "--detach", "--restart", "unless-stopped",
+            "--publish", "${port}:${port}",
+            "-e", "ACCEPT_EULA=Y",
+            "-e", "SA_PASSWORD=$saPassword",
+            "-e", "MSSQL_PID=Developer",
+            "-e", "MSSQL_COLLATION=$collation"
+        )
+
+        if ($enableDtc) {
+            Write-Output "Enabling distributed transactions (MSDTC) in the container"
+            # SQL Server 2019+ containers run as a non-root user and cannot bind to the privileged
+            # RPC port 135, so the endpoint mapper listens on 13500 and Docker maps host 135 to it.
+            # See https://learn.microsoft.com/sql/linux/containers/configure-distributed-transactions
+            $dockerArgs += @(
+                "-e", "MSSQL_RPC_PORT=13500",
+                "-e", "MSSQL_DTC_TCP_PORT=51000",
+                "--publish", "135:13500",
+                "--publish", "51000:51000"
+            )
+        }
+
+        if ($enableFts) {
+            Write-Output "Starting SQL Server container in setup mode for Full-Text Search installation..."
+            $dockerArgs += @("--entrypoint", "/bin/bash", $image, "-lc", "sleep infinity")
+        }
+        else {
+            $dockerArgs += $image
+        }
+
+        Write-Output "::group::Starting SQL Server container"
+        & wsl.exe --distribution $wslDistribution -- docker @dockerArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to start SQL Server container in WSL"
+        }
+        & wsl.exe --distribution $wslDistribution -- docker ps --filter "name=$containerName"
+        Write-Output "::endgroup::"
+
+        if ($enableFts) {
+            switch ($version) {
+                "2025" { $sqlEngineMajor = 17; $repoChannel = "2025" }
+                "2022" { $sqlEngineMajor = 16; $repoChannel = "2022" }
+                "2019" { $sqlEngineMajor = 15; $repoChannel = "2019" }
+                default {
+                    throw "Unsupported sqlserver-version for FTS: '$version'. Supported values: 2019, 2022, 2025."
+                }
+            }
+
+            # Single-line, single-quoted PowerShell string: every $ stays literal for bash, the
+            # awk single quotes are doubled ('') for PowerShell, and the __CHANNEL__/__ENGINE__
+            # placeholders are filled in from the values above. (A PowerShell here-string cannot
+            # be used here because its closing '@ must sit at column 0, which would exit the YAML
+            # block scalar.)
+            $ftsScript = 'set -euo pipefail; apt-get update; ACCEPT_EULA=Y apt-get install -y --no-install-recommends curl gnupg; . /etc/os-release; curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /usr/share/keyrings/microsoft-prod.gpg; echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/${VERSION_ID}/mssql-server-__CHANNEL__ ${VERSION_CODENAME} main" > /etc/apt/sources.list.d/mssql-server.list; apt-get update; fts_version=$(apt-cache madison mssql-server-fts | awk ''{print $3}'' | grep -E "^__ENGINE__\." | head -n 1); if [ -z "${fts_version}" ]; then echo "No mssql-server-fts package found for SQL Server engine major __ENGINE__." >&2; exit 1; fi; ACCEPT_EULA=Y apt-get install -y --no-install-recommends "mssql-server-fts=${fts_version}"; apt-get clean; rm -rf /var/lib/apt/lists/*'
+            $ftsScript = $ftsScript -replace '__CHANNEL__', $repoChannel -replace '__ENGINE__', $sqlEngineMajor
+
+            Write-Output "::group::Installing Full-Text Search support in the SQL Server container"
+            & wsl.exe --distribution $wslDistribution -- docker exec -u 0 $containerName bash -lc $ftsScript
+            if ($LASTEXITCODE -ne 0) {
+                throw "Full-Text Search installation failed"
+            }
+
+            Write-Output "Starting SQL Server process..."
+            & wsl.exe --distribution $wslDistribution -- docker exec -d $containerName /opt/mssql/bin/sqlservr
+            Write-Output "::endgroup::"
+        }
+
+        # Determine the WSL VM IPv4 address so that Windows can reach the published port.
+        $wslIp = ((wsl.exe --distribution $wslDistribution --user root -- hostname -I) -replace "`0", "").Trim().Split(" ", [System.StringSplitOptions]::RemoveEmptyEntries) |
+            Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' } |
+            Select-Object -First 1
+
+        if (-not $wslIp) {
+            throw "Could not determine the WSL IPv4 address"
+        }
+
+        $ipAddress = $wslIp
+        Write-Output "WSL address: $ipAddress"
+
+        # The Windows runner ships a native sqlcmd (MSSQL.CMDLnUtils). Wrap it so the self-signed
+        # container certificate is trusted (-C). This keeps the "bare sqlcmd" contract documented in
+        # the README working from Windows too. Locate it on PATH first, then in the usual Binn folders.
+        $sqlcmdExe = (Get-Command sqlcmd.exe -ErrorAction SilentlyContinue).Source
+        if (-not $sqlcmdExe) {
+            $sqlcmdExe = @(
+                "C:\Program Files\Microsoft SQL Server\*\Tools\Binn\sqlcmd.exe",
+                "C:\Program Files\Microsoft SQL Server\Client SDK\*\Tools\Binn\sqlcmd.exe"
+            ) | ForEach-Object { Get-Item $_ -ErrorAction SilentlyContinue } |
+                Sort-Object FullName |
+                Select-Object -ExpandProperty FullName -First 1
+            if (-not $sqlcmdExe) {
+                throw "sqlcmd.exe was not found on the runner. Install the SQL Server Command Line Utilities (MSSQL.CMDLnUtils)."
+            }
+        }
+        Write-Output "Using sqlcmd: $sqlcmdExe"
+
+        $shimDir = Join-Path $Env:RUNNER_TEMP "sqlcmd-shim"
+        New-Item -ItemType Directory -Force -Path $shimDir | Out-Null
+        $shimPath = Join-Path $shimDir "sqlcmd.cmd"
+        Set-Content -Path $shimPath -Encoding ASCII -Value "@echo off`r`n`"$sqlcmdExe`" -C %*"
+        Write-Output "Adding sqlcmd forwarding script to PATH"
+        $shimDir | Out-File -FilePath $Env:GITHUB_PATH -Encoding utf8 -Append
+
+        # Make the native sqlcmd connect to the container without explicit login parameters, mirroring
+        # how the in-container sqlcmd is configured on Linux.
+        "SQLCMDSERVER=$ipAddress" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+        "SQLCMDUSER=sa" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+        "SQLCMDPASSWORD=$saPassword" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+
+        Write-Output "Setting environment variable $envVarName to SQL connection string..."
+        "$envVarName=Server=$ipAddress;Database=$catalog;User Id=sa;Password=$saPassword;Encrypt=false;$extraParams" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
     - name: Start SQL Server (Linux)
       if: runner.os == 'Linux'
       shell: bash
@@ -80,6 +300,19 @@ runs:
           --name sqlserver
           -d
         )
+
+        if [ "${{ inputs.enable-distributed-transactions }}" = "true" ]; then
+          echo "Enabling distributed transactions (MSDTC) in the container"
+          # SQL Server 2019+ containers run as a non-root user and cannot bind to the privileged
+          # RPC port 135, so the endpoint mapper listens on 13500 and Docker maps host 135 to it.
+          # See https://learn.microsoft.com/sql/linux/containers/configure-distributed-transactions
+          base_run_args+=(
+            -e "MSSQL_RPC_PORT=13500"
+            -e "MSSQL_DTC_TCP_PORT=51000"
+            -p "135:13500"
+            -p "51000:51000"
+          )
+        fi
 
         if [ "${{ inputs.enable-full-text-search }}" = "true" ]; then
           echo "Starting SQL Server container in setup mode for Full-Text Search installation..."
