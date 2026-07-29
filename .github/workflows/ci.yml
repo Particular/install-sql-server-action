@@ -81,18 +81,10 @@ jobs:
 
           sqlcmd -b -Q "IF FULLTEXTSERVICEPROPERTY('IsFullTextInstalled') <> 1 THROW 50001, 'Full-Text Search is not installed.', 1;"
 
-          # The FTS exercise is written to a file and run with `sqlcmd -i` so it works identically
-          # through the Linux in-container sqlcmd forwarding script and the Windows native sqlcmd
-          # wrapper (which forwards via a .cmd shim and therefore should not receive multi-line args).
-          @"
-          USE [my-test-catalog];
-          CREATE TABLE dbo.FullTextSmoke (Id INT NOT NULL, Content NVARCHAR(200) NOT NULL);
-          CREATE UNIQUE INDEX UX_FullTextSmoke_Id ON dbo.FullTextSmoke(Id);
-          CREATE FULLTEXT CATALOG SmokeCatalog AS DEFAULT;
-          CREATE FULLTEXT INDEX ON dbo.FullTextSmoke(Content LANGUAGE 1033) KEY INDEX UX_FullTextSmoke_Id;
-          "@ | Set-Content -Path fts-check.sql -Encoding utf8
-
-          sqlcmd -b -i fts-check.sql
+          # Exercise Full-Text Search on a single line: the Windows sqlcmd wrapper forwards via a
+          # .cmd shim (no multi-line args), and the Linux wrapper forwards to the in-container
+          # sqlcmd (which cannot read host-side files, so `sqlcmd -i <file>` does not work there).
+          sqlcmd -b -Q "USE [my-test-catalog]; CREATE TABLE dbo.FullTextSmoke (Id INT NOT NULL, Content NVARCHAR(200) NOT NULL); CREATE UNIQUE INDEX UX_FullTextSmoke_Id ON dbo.FullTextSmoke(Id); CREATE FULLTEXT CATALOG SmokeCatalog AS DEFAULT; CREATE FULLTEXT INDEX ON dbo.FullTextSmoke(Content LANGUAGE 1033) KEY INDEX UX_FullTextSmoke_Id;"
   ci-distributed-transactions:
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.name }}-${{ matrix.sqlserver.label }}${{ matrix.fts && '-FTS' || '' }}-DTC

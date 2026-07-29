@@ -75,7 +75,6 @@ runs:
             # host, and because the Linux container's MSDTC does not authenticate RPC, the host
             # must use "No Authentication Required". Without this, distributed transactions that
             # used to work via the local DTC would fail after the switch to a container.
-            # See https://learn.microsoft.com/powershell/module/msdtc/set-dtcnetworksetting
             Write-Output "::group::Configuring host Local DTC for distributed transactions"
 
             $dtcService = Get-Service -Name MSDTC -ErrorAction SilentlyContinue
@@ -90,13 +89,42 @@ runs:
             }
 
             Write-Output "Enabling Network DTC Access (inbound + outbound) with No Authentication"
-            # Set-DtcNetworkSetting restarts the Local DTC instance so the changes take effect.
-            Set-DtcNetworkSetting -DtcName Local `
-                -AuthenticationLevel NoAuth `
-                -InboundTransactionsEnabled $true `
-                -OutboundTransactionsEnabled $true `
-                -RemoteClientAccessEnabled $true `
-                -RemoteAdministrationAccessEnabled $true
+            # Configure Local DTC directly in the registry. Set-DtcNetworkSetting throws a
+            # NullReferenceException in this headless environment (the MsDtc CIM provider is not
+            # ready right after the service starts); these are the same values it would write and
+            # the service is restarted below so they take effect.
+            # See https://learn.microsoft.com/troubleshoot/windows/win32/new-functionality-in-msdtc-service
+            $securityPath = "HKLM:\SOFTWARE\Microsoft\MSDTC\Security"
+            $msdtcPath = "HKLM:\SOFTWARE\Microsoft\MSDTC"
+            if (-not (Test-Path $securityPath)) { New-Item -Path $securityPath -Force | Out-Null }
+            if (-not (Test-Path $msdtcPath)) { New-Item -Path $msdtcPath -Force | Out-Null }
+
+            $networkAccess = @{
+                NetworkDtcAccess             = 1
+                NetworkDtcAccessAdmin        = 1
+                NetworkDtcAccessClients      = 1
+                NetworkDtcAccessTransactions = 1
+                NetworkDtcAccessInbound      = 1
+                NetworkDtcAccessOutbound     = 1
+                LuTransactions               = 1
+                XaTransactions               = 1
+            }
+            foreach ($name in $networkAccess.Keys) {
+                Set-ItemProperty -Path $securityPath -Name $name -Value $networkAccess[$name] -Type DWord
+            }
+
+            # "No Authentication Required" (the container's MSDTC does not authenticate RPC).
+            $noAuthentication = @{
+                AllowOnlySecureRpcCalls          = 0
+                FallbackToUnsecureRPCIfNecessary = 0
+                TurnOffRpcSecurity               = 1
+            }
+            foreach ($name in $noAuthentication.Keys) {
+                Set-ItemProperty -Path $msdtcPath -Name $name -Value $noAuthentication[$name] -Type DWord
+            }
+
+            Write-Output "Restarting the MSDTC service to apply the registry changes"
+            Restart-Service -Name MSDTC -Force
 
             Write-Output "Allowing the Distributed Transaction Coordinator through Windows Firewall"
             Enable-NetFirewallRule -DisplayGroup "Distributed Transaction Coordinator"
@@ -214,16 +242,32 @@ runs:
                 }
             }
 
-            # Single-line, single-quoted PowerShell string: every $ stays literal for bash, the
-            # awk single quotes are doubled ('') for PowerShell, and the __CHANNEL__/__ENGINE__
-            # placeholders are filled in from the values above. (A PowerShell here-string cannot
-            # be used here because its closing '@ must sit at column 0, which would exit the YAML
-            # block scalar.)
-            $ftsScript = 'set -euo pipefail; apt-get update; ACCEPT_EULA=Y apt-get install -y --no-install-recommends curl gnupg; . /etc/os-release; curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /usr/share/keyrings/microsoft-prod.gpg; echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/${VERSION_ID}/mssql-server-__CHANNEL__ ${VERSION_CODENAME} main" > /etc/apt/sources.list.d/mssql-server.list; apt-get update; fts_version=$(apt-cache madison mssql-server-fts | awk ''{print $3}'' | grep -E "^__ENGINE__\." | head -n 1); if [ -z "${fts_version}" ]; then echo "No mssql-server-fts package found for SQL Server engine major __ENGINE__." >&2; exit 1; fi; ACCEPT_EULA=Y apt-get install -y --no-install-recommends "mssql-server-fts=${fts_version}"; apt-get clean; rm -rf /var/lib/apt/lists/*'
-            $ftsScript = $ftsScript -replace '__CHANNEL__', $repoChannel -replace '__ENGINE__', $sqlEngineMajor
+            # The FTS install script is assembled from single-quoted lines and then base64-encoded
+            # before being sent to the container. Encoding is essential: the script is forwarded
+            # through PowerShell -> wsl.exe -> docker exec -> bash, and the WSL interop mangles the
+            # embedded double quotes in the `echo "deb ..."` line, which writes a malformed apt
+            # sources list and breaks `apt-get update`. Base64 carries only [A-Za-z0-9+/=], so it
+            # transits every layer unchanged. __CHANNEL__/__ENGINE__ are filled in before encoding.
+            $ftsLines = @(
+                'set -euo pipefail'
+                'rm -f /etc/apt/sources.list.d/mssql-server.list'
+                'apt-get update'
+                'ACCEPT_EULA=Y apt-get install -y --no-install-recommends curl gnupg'
+                '. /etc/os-release'
+                'curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /usr/share/keyrings/microsoft-prod.gpg'
+                'echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/${VERSION_ID}/mssql-server-__CHANNEL__ ${VERSION_CODENAME} main" > /etc/apt/sources.list.d/mssql-server.list'
+                'apt-get update'
+                'fts_version=$(apt-cache madison mssql-server-fts | awk ''{print $3}'' | grep -E "^__ENGINE__\." | head -n 1)'
+                'if [ -z "${fts_version}" ]; then echo "No mssql-server-fts package found for SQL Server engine major __ENGINE__." >&2; exit 1; fi'
+                'ACCEPT_EULA=Y apt-get install -y --no-install-recommends "mssql-server-fts=${fts_version}"'
+                'apt-get clean'
+                'rm -rf /var/lib/apt/lists/*'
+            )
+            $ftsScript = ($ftsLines -join "`n") -replace '__CHANNEL__', $repoChannel -replace '__ENGINE__', $sqlEngineMajor
+            $encoded = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($ftsScript))
 
             Write-Output "::group::Installing Full-Text Search support in the SQL Server container"
-            & wsl.exe --distribution $wslDistribution -- docker exec -u 0 $containerName bash -lc $ftsScript
+            & wsl.exe --distribution $wslDistribution -- docker exec -u 0 $containerName bash -c "echo $encoded | base64 -d | bash"
             if ($LASTEXITCODE -ne 0) {
                 throw "Full-Text Search installation failed"
             }
