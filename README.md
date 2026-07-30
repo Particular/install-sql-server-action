@@ -9,9 +9,7 @@ This action installs and runs SQL Server for a GitHub Actions workflow. Also [ad
 1. Creates environment variables for a connection string and for `sqlcmd`.
 1. Waits for the SQL instance to be accessible.
 1. Creates a default database catalog.
-
-> [!NOTE]
-> Because this is a composite action, it has no cleanup/post step (GitHub does not support post steps for composite actions). On hosted runners this is fine — the runner VM is destroyed at the end of the job, taking the container (and, on Windows, the WSL distribution) with it.
+1. Tears the container down in a post step (see [Cleanup](#cleanup)).
 
 ## Usage
 
@@ -20,7 +18,7 @@ Install SQL Server 2022 with a default database of `nservicebus` and put the con
 ```yaml
 steps:
   - name: Install SQL Server
-    uses: Particular/install-sql-server-action@v1.4.0 # Check if this is the latest version at https://github.com/Particular/install-sql-server-action/tags
+    uses: Particular/install-sql-server-action@v1.5.0 # Check if this is the latest version at https://github.com/Particular/install-sql-server-action/tags
     with:
       connection-string-env-var: SQL_SERVER_CONNECTION_STRING
       catalog: nservicebus
@@ -31,7 +29,7 @@ It is also possible to specify the SQl server major version to be installed
 ```yaml
 steps:
   - name: Install SQL Server
-    uses: Particular/install-sql-server-action@v1.4.0 # Check if this is the latest version at https://github.com/Particular/install-sql-server-action/tags
+    uses: Particular/install-sql-server-action@v1.5.0 # Check if this is the latest version at https://github.com/Particular/install-sql-server-action/tags
     with:
       connection-string-env-var: SQL_SERVER_CONNECTION_STRING
       sqlserver-version: 2019
@@ -43,7 +41,7 @@ To add additional parameters to the end of the connection string, such as `Max P
 ```yaml
 steps:
   - name: Install SQL Server
-    uses: Particular/install-sql-server-action@v1.4.0 # Check if this is the latest version at https://github.com/Particular/install-sql-server-action/tags
+    uses: Particular/install-sql-server-action@v1.5.0 # Check if this is the latest version at https://github.com/Particular/install-sql-server-action/tags
     with:
       connection-string-env-var: SQL_SERVER_CONNECTION_STRING
       catalog: nservicebus
@@ -55,7 +53,7 @@ To enable SQL Server Full-Text Search:
 ```yaml
 steps:
   - name: Install SQL Server
-    uses: Particular/install-sql-server-action@v1.4.0 # Check if this is the latest version at https://github.com/Particular/install-sql-server-action/tags
+    uses: Particular/install-sql-server-action@v1.5.0 # Check if this is the latest version at https://github.com/Particular/install-sql-server-action/tags
     with:
       connection-string-env-var: SQL_SERVER_CONNECTION_STRING
       catalog: nservicebus
@@ -67,7 +65,7 @@ To enable distributed transactions (MSDTC) in the container:
 ```yaml
 steps:
   - name: Install SQL Server
-    uses: Particular/install-sql-server-action@v1.4.0 # Check if this is the latest version at https://github.com/Particular/install-sql-server-action/tags
+    uses: Particular/install-sql-server-action@v1.5.0 # Check if this is the latest version at https://github.com/Particular/install-sql-server-action/tags
     with:
       connection-string-env-var: SQL_SERVER_CONNECTION_STRING
       catalog: nservicebus
@@ -102,6 +100,12 @@ Because the previous Windows path ran a native SQL Server Express instance on th
 > TransactionManager.ImplicitDistributedTransactions = true;
 > ```
 
+## Cleanup
+
+The action runs a JavaScript-based entry point (`dist/index.mjs`) for both `main` and `post`. The post step invokes `cleanup.ps1`, which removes the SQL Server container (`sqlserver`) it started in the main step. On Windows it also restores the DTC/RPC firewall rule profiles to `Domain,Private` if they were widened for the duration of the job. The container name is persisted via the action state so the post step can target the right container, and external tooling (CI verification scripts, `docker exec sqlserver …`) can address it without resolving state.
+
+On hosted runners this cleanup is harmless — the runner VM is destroyed at the end of the job — but it keeps long-lived self-hosted runners from accumulating orphaned containers.
+
 ## Connection string
 
 The generated connection string uses SQL authentication (`User Id=sa;Password=...;Encrypt=false;`):
@@ -121,7 +125,7 @@ For example:
 ```yaml
 steps:
   - name: Install SQL Server
-    uses: Particular/install-sql-server-action@v1.4.0 # Check if this is the latest version at https://github.com/Particular/install-sql-server-action/tags
+    uses: Particular/install-sql-server-action@v1.5.0 # Check if this is the latest version at https://github.com/Particular/install-sql-server-action/tags
     with:
       connection-string-env-var: SQL_SERVER_CONNECTION_STRING
       catalog: nservicebus
@@ -132,4 +136,39 @@ steps:
         sqlcmd -Q "CREATE SCHEMA receiver AUTHORIZATION db_owner" -d "nservicebus"
         sqlcmd -Q "CREATE SCHEMA sender AUTHORIZATION db_owner" -d "nservicebus"
         sqlcmd -Q "CREATE SCHEMA db@ AUTHORIZATION db_owner" -d "nservicebus"
+```
+
+## Local development
+
+The action uses [`@vercel/ncc`](https://github.com/vercel/ncc) to bundle `index.mjs` and its dependencies into a single `dist/index.mjs` that the runner executes directly. After editing `index.mjs`, rebuild the bundle with:
+
+```bash
+npm install
+npm run build
+```
+
+(`npm install` triggers the `prepare` script, which runs `ncc build`.)
+
+The Full-Text Search installer lives in [`scripts/install-fts.sh`](scripts/install-fts.sh) and is `docker cp`'d into the SQL Server container at runtime, so it stays a real, editable shell script (no base64 dance) and the same file is used on both Linux and Windows.
+
+To test the cleanup action, create a `.env.cleanup` file in the repository root with:
+
+```
+INPUT_CONNECTION-STRING-ENV-VAR=SQL_SERVER_CONNECTION_STRING
+STATE_IsPost=true
+STATE_ContainerName=sqlserver
+STATE_EnableDistributedTransactions=false
+```
+
+…and then run:
+
+```bash
+node -r dotenv/config dist/index.mjs dotenv_config_path=.env.cleanup
+```
+
+To run setup.ps1 / cleanup.ps1 directly during local debugging, set the same `INPUT_*` and `STATE_*` variables they expect on the command line:
+
+```bash
+pwsh -File setup.ps1 -ContainerName sqlserver -ConnectionStringName SQL_SERVER_CONNECTION_STRING -Catalog nservicebus
+pwsh -File cleanup.ps1 -ContainerName sqlserver
 ```
