@@ -144,7 +144,7 @@ The action uses [`@vercel/ncc`](https://github.com/vercel/ncc) to bundle `index.
 
 ```bash
 npm install
-npm run build
+npm run prepare
 ```
 
 (`npm install` triggers the `prepare` script, which runs `ncc build`.)
