@@ -2,13 +2,16 @@
 
 This action installs and runs SQL Server for a GitHub Actions workflow. Also [adds support for sqlcmd](#using-sqlcmd).
 
-1. Installs SQL Server
-  * On Windows, uses [Chocolatey](https://chocolatey.org/) to install [SQL Server Express](https://community.chocolatey.org/packages/sql-server-express).
-  * On Linux, runs SQL as a Docker container using the `mcr.microsoft.com/mssql/server:2022-latest` image.
+1. Runs SQL Server in a Linux Docker container on every platform.
+  * On Linux, the container runs directly via Docker using the `mcr.microsoft.com/mssql/server:2022-latest` image.
+  * On Windows, the Linux container runs inside WSL2 (the action installs and starts Docker inside the WSL distribution).
   * Sets collation to case sensitive `SQL_Latin1_General_CP1_CS_AS` note SQL Azure is insensitive `CI_AS`
-1. Creates environement variables for a connection string and for `sqlcmd`.
+1. Creates environment variables for a connection string and for `sqlcmd`.
 1. Waits for the SQL instance to be accessible.
 1. Creates a default database catalog.
+
+> [!NOTE]
+> Because this is a composite action, it has no cleanup/post step (GitHub does not support post steps for composite actions). On hosted runners this is fine — the runner VM is destroyed at the end of the job, taking the container (and, on Windows, the WSL distribution) with it.
 
 ## Usage
 
@@ -59,6 +62,18 @@ steps:
       enable-full-text-search: "true"
 ```
 
+To enable distributed transactions (MSDTC) in the container:
+
+```yaml
+steps:
+  - name: Install SQL Server
+    uses: Particular/install-sql-server-action@v1.4.0 # Check if this is the latest version at https://github.com/Particular/install-sql-server-action/tags
+    with:
+      connection-string-env-var: SQL_SERVER_CONNECTION_STRING
+      catalog: nservicebus
+      enable-distributed-transactions: "true"
+```
+
 ## Parameters
 
 | Parameter | Required | Default | Description |
@@ -69,17 +84,36 @@ steps:
 | `sqlserver-version` | No | `2022` | The SQL server major version to use. |
 | `extra-params` | No | - | Extra parameters to be appended to the end of the connection string. |
 | `enable-full-text-search` | No | `"false"` | When set to `"true"`, the action installs/enables and verifies SQL Server Full-Text Search before completion. |
+| `enable-distributed-transactions` | No | `"false"` | When set to `"true"`, configures the container for the Microsoft Distributed Transaction Coordinator (MSDTC) so SQL Server can participate in distributed transactions. |
 
 When `enable-full-text-search` is enabled, setup time may increase because extra SQL components/packages are installed.
-On Windows, this switches installation to Chocolatey's `sql-server-express-adv` package so Full-Text Search is available.
-On Linux, the action adds the matching Microsoft SQL Server apt feed and installs `mssql-server-fts` for the requested SQL Server major version.
+On both Linux and Windows the SQL Server container is the same Linux image, so Full-Text Search is added by installing the matching `mssql-server-fts` apt package for the requested SQL Server major version.
 Current Full-Text Search setup support includes SQL Server major versions `2019`, `2022`, and `2025`.
+
+When `enable-distributed-transactions` is enabled, the action sets the `MSSQL_RPC_PORT` and `MSSQL_DTC_TCP_PORT` environment variables and publishes the corresponding ports (`135` and `51000`) on the container, following the [SQL Server Linux container distributed transactions guidance](https://learn.microsoft.com/en-us/sql/linux/containers/configure-distributed-transactions).
+SQL Server 2019 and later containers run as a non-root user and cannot bind to the privileged RPC port `135`, so the RPC endpoint mapper listens on `13500` and the action maps host port `135` to it.
+On Windows the ports are published inside the WSL2 VM and are reachable from the host via the WSL IP (the same address used in the connection string).
+
+Because the previous Windows path ran a native SQL Server Express instance on the same host, distributed transactions were coordinated by the **local** DTC and worked without any configuration. Running SQL Server in a WSL2 container turns those into **network** transactions, so on Windows the action additionally configures the host's Local DTC when this input is set: it enables Network DTC Access (inbound and outbound), sets the authentication level to **No Authentication Required** (the Linux container's MSDTC does not authenticate RPC), allows the Distributed Transaction Coordinator through Windows Firewall, sets the container's hostname to `sqlserver`, and adds a Windows hosts file entry mapping that name to the WSL2 IP. The hostname mapping is necessary because the container's DTC advertises its hostname in its transaction "whereabouts" — without a resolvable name the host DTC cannot push the transaction (see [mssql-docker#492](https://github.com/microsoft/mssql-docker/issues/492)). This restores the previous "it just works" behavior for consumers' distributed-transaction tests.
+
+> [!NOTE]
+> **.NET 7+ opt-in:** Since .NET 7, `TransactionManager.ImplicitDistributedTransactions` defaults to `false`, meaning `TransactionScope` escalation to MSDTC throws `NotSupportedException` unless the application explicitly sets `TransactionManager.ImplicitDistributedTransactions = true` at startup. This is a per-process setting the action cannot set for consumers. If your tests use distributed transactions, add this one line to your test setup:
+> ```csharp
+> TransactionManager.ImplicitDistributedTransactions = true;
+> ```
+
+## Connection string
+
+The generated connection string uses SQL authentication (`User Id=sa;Password=...;Encrypt=false;`):
+
+- On **Linux** the data source is `localhost` (`Server=localhost;...`).
+- On **Windows** the data source is the WSL2 VM IP address (`Server=<wsl-ip>;...`) so that the host can reach the container. The `WSL_DISTRIBUTION_OVERRIDE` and `WSL_MEMORY_OVERRIDE` environment variables can be set to override the distribution name (default `Debian`) and the `.wslconfig` memory limit (default `4GB`) respectively.
 
 ## Using `sqlcmd`
 
 The action also makes it possible to run `sqlcmd`. How it does this is different based on platform:
 
-- Windows: `sqlcmd` is installed along with SQL Express. The action creates the necessary environment variables so that `sqlcmd` can be used without any additional login parameters.
+- Windows: The runner's native `sqlcmd` (installed via the SQL Server Command Line Utilities) is wrapped in a small `sqlcmd.cmd` shim that injects `-C` so the container's self-signed certificate is trusted. The action sets the `SQLCMDSERVER`, `SQLCMDUSER`, and `SQLCMDPASSWORD` environment variables (pointing at the WSL container), so `sqlcmd` can be used without any additional login parameters. For larger scripts, prefer `sqlcmd -i <file>` over passing multi-line arguments inline.
 - Linux: A bash script named `sqlcmd` is created and added to the PATH. All commands to it are forwarded to the Docker container via `docker exec`. The Docker container is initialized with environment variables so that login parameters are not necessary.
 
 For example:
