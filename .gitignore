@@ -1,3 +1,4 @@
-bin/
-obj/
+node_modules/
+src/tests/bin/
+src/tests/obj/
 *.user

@@ -1,0 +1,40 @@
+{
+  "name": "install-sql-server-action",
+  "version": "1.0.0",
+  "description": "Install and run SQL Server in a container for GitHub Actions workflows.",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "dev": "npm-watch",
+    "prepare": "ncc build index.mjs -o dist --license licenses.txt"
+  },
+  "watch": {
+    "prepare": {
+      "patterns": [
+        "index.mjs"
+      ],
+      "ignore": "dist/*",
+      "runOnChangeOnly": true
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Particular/install-sql-server-action.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Particular/install-sql-server-action/issues"
+  },
+  "homepage": "https://github.com/Particular/install-sql-server-action#readme",
+  "devDependencies": {
+    "@vercel/ncc": "^0.44.1"
+  },
+  "dependencies": {
+    "@actions/core": "^3.0.0",
+    "@actions/exec": "^3.0.0",
+    "dotenv": "^17.0.0",
+    "npm-watch": "^0.13.0"
+  }
+}

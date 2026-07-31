@@ -1,0 +1,9 @@
+# Shell scripts must stay LF: bash on the SQL Server container (Linux) doesn't
+# reliably tolerate CRLF, and forcing CRLF on Windows would just bloat the bytes
+# that `docker cp` ships into the container.
+*.sh        text eol=lf
+
+# PowerShell 7 (pwsh) handles LF cleanly on both Linux and Windows, and using a
+# single line-ending convention across the project keeps diffs and review comments
+# focused on real changes.
+*.ps1       text eol=lf
