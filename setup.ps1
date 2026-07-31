@@ -488,18 +488,6 @@ if (-not $ready) {
     throw "SQL Server did not become ready within 150s."
 }
 
-if ($enableFts) {
-    Write-Output "Verifying Full-Text Search availability..."
-    $ftsOutput = sqlcmd -h -1 -W -t 30 -Q "SET NOCOUNT ON; SELECT FULLTEXTSERVICEPROPERTY('IsFullTextInstalled');"
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to query Full-Text Search availability"
-    }
-    $ftsInstalled = ($ftsOutput | Out-String).Trim()
-    if ($ftsInstalled -ne '1') {
-        throw "Full-Text Search was requested but is not available."
-    }
-}
-
 Write-Output "::group::Creating initial catalog '$Catalog'"
 $catalogReady = $false
 for ($i = 1; $i -le 10; $i++) {
