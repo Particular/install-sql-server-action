@@ -285,7 +285,7 @@ elseif ($runnerOs -eq "Windows") {
 
     if ($installedDistributions -notcontains $wslDistribution) {
         Write-Output "Installing $wslDistribution in WSL"
-        wsl.exe --install $wslDistribution --web-download --no-launch
+        wsl.exe --install $wslDistribution --no-launch
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to install $wslDistribution in WSL"
         }
