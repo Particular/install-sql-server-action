@@ -11,8 +11,10 @@ param (
 
 $ErrorActionPreference = 'Stop'
 
-$modulePath = Join-Path $PSScriptRoot 'modules' 'WslTools'
-Import-Module $modulePath -Force
+if (-not $Env:WSL_TOOLS_MODULE_PATH) {
+    throw "This action requires Particular/setup-wsl-action to run first — it provisions WSL/Docker and exports the WslTools module at WSL_TOOLS_MODULE_PATH."
+}
+Import-Module $Env:WSL_TOOLS_MODULE_PATH -Force
 
 function Save-State {
     param(
@@ -60,16 +62,13 @@ function Install-FullTextSearch {
 
     $containerScriptPath = "/tmp/install-fts.sh"
     if ($WslDistribution) {
-        # The host file must be visible to the WSL filesystem before `wsl.exe ... docker cp`
-        # can copy it into the container. WSL auto-mounts the Windows drive containing the
-        # temp directory under /mnt/<drive>/, so we translate the host path ourselves instead
+        # The host file must be visible to the WSL filesystem before Docker inside WSL can copy
+        # it into the container. WSL auto-mounts the Windows drive containing the temp directory
+        # under /mnt/<drive>/, so we translate the host path ourselves (ConvertTo-WslPath) instead
         # of round-tripping through `wslpath` -- the interop arg parser mangles backslashes.
         $wslRenderedPath = ConvertTo-WslPath -WindowsPath $renderedPath
-        & wsl.exe --distribution $WslDistribution -- docker cp $wslRenderedPath "${ContainerName}:${containerScriptPath}"
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to copy FTS install script into the container"
-        }
-        & wsl.exe --distribution $WslDistribution -- docker exec -u 0 $ContainerName bash $containerScriptPath
+        Invoke-Wsl -Distribution $WslDistribution -CheckExitCode -Command "docker cp '$wslRenderedPath' '${ContainerName}:${containerScriptPath}'"
+        Invoke-Wsl -Distribution $WslDistribution -CheckExitCode -Command "docker exec -u 0 $ContainerName bash $containerScriptPath"
     }
     else {
         docker cp $renderedPath "${ContainerName}:${containerScriptPath}"
@@ -261,76 +260,14 @@ if ($runnerOs -eq "Linux") {
 elseif ($runnerOs -eq "Windows") {
     Write-Output "Running SQL Server in container $ContainerName inside WSL"
 
-    $wslDistribution = $Env:WSL_DISTRIBUTION_OVERRIDE ?? "Debian"
+    # WSL and Docker were provisioned by setup-wsl-action. Read the distribution and the WSL
+    # VM IP from the environment it exported rather than provisioning or detecting them here.
+    $wslDistribution = $Env:WSL_DISTRIBUTION
+    $ipAddress = $Env:WSL_IP
 
-    # Constrain the WSL2 VM (memory) and keep it from being shut down when idle, so
-    # that Docker and the container are not torn down between this setup step and the
-    # later test steps. Only write when the file is absent so local development
-    # configurations are left untouched.
-    $wslConfigPath = Join-Path $Env:USERPROFILE ".wslconfig"
-    if (-not (Test-Path $wslConfigPath)) {
-        $wslMemory = $Env:WSL_MEMORY_OVERRIDE ?? "4GB"
-        Write-Output "Writing $wslConfigPath (memory=$wslMemory) to constrain the WSL2 VM"
-        Set-Content -Path $wslConfigPath -Value "[wsl2]`nmemory=$wslMemory`nvmIdleTimeout=-1" -Encoding ASCII
+    if (-not $ipAddress) {
+        throw "WSL_IP is not set. Run Particular/setup-wsl-action before this action."
     }
-
-    Write-Output "::group::Preparing WSL ($wslDistribution)"
-
-    wsl.exe --set-default-version 2 | Out-Null
-
-    # Install the distribution if it is not already registered.
-    $installedDistributions = ((wsl.exe --list --quiet) -replace "`0", "") |
-        ForEach-Object { $_.Trim() } |
-        Where-Object { $_ -ne "" }
-
-    if ($installedDistributions -notcontains $wslDistribution) {
-        Write-Output "Installing $wslDistribution in WSL"
-        wsl.exe --install $wslDistribution --web-download --no-launch
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to install $wslDistribution in WSL"
-        }
-    }
-    else {
-        Write-Output "$wslDistribution is already installed"
-    }
-
-    # Ensure Docker is installed inside the WSL distribution.
-    Write-Output "Ensuring Docker is installed inside $wslDistribution"
-    Invoke-Wsl -Distribution $wslDistribution -CheckExitCode -Command "command -v docker >/dev/null 2>&1 || { apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --yes docker.io; }"
-
-    # Start the Docker daemon via systemd when available, otherwise via the SysV service.
-    Write-Output "Starting Docker daemon inside $wslDistribution"
-    Invoke-Wsl -Distribution $wslDistribution -CheckExitCode -Command "docker info >/dev/null 2>&1 || { if [ -d /run/systemd/system ]; then systemctl start docker; else service docker start; fi; }"
-
-    # Keep the WSL instance alive for the rest of the job. WSL terminates an instance when no
-    # processes remain under its init (PID 2); a plain background process (e.g. sleep) does not
-    # prevent this, but a D-Bus session bus launched through `wsl --exec` does. vmIdleTimeout
-    # above covers the VM-level idle timeout; this covers the separate instance-level shutdown.
-    # See https://github.com/microsoft/WSL/issues/10138 and
-    # https://blog.lecoteauverdoyant.co.uk/articles/wsl-keep-alive.html
-    Write-Output "Starting a D-Bus session to keep the WSL instance alive for the job"
-    # dbus-launch ships in the dbus-x11 package (not dbus). Verify it is present afterwards so a
-    # packaging change can never silently leave the instance unguarded again.
-    Invoke-Wsl -Distribution $wslDistribution -CheckExitCode -Command "command -v dbus-launch >/dev/null 2>&1 || { apt-get update && apt-get install -y dbus-x11; }; command -v dbus-launch >/dev/null 2>&1 || { echo 'dbus-launch is unavailable after installing dbus-x11' >&2; exit 1; }"
-    wsl.exe --distribution $wslDistribution --user root --exec /usr/bin/dbus-launch true
-    if ($LASTEXITCODE -ne 0) {
-        throw "dbus-launch keep-alive failed with exit code $LASTEXITCODE"
-    }
-
-    Write-Output "::endgroup::"
-
-    # Determine the WSL VM IPv4 address early -- it's needed for the container hostname (DTC)
-    # and for the connection string, and the VM's IP is stable once WSL is running.
-    $wslIp = ((wsl.exe --distribution $wslDistribution --user root -- hostname -I) -replace "`0", "").Trim().Split(" ", [System.StringSplitOptions]::RemoveEmptyEntries) |
-        Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' } |
-        Select-Object -First 1
-
-    if (-not $wslIp) {
-        throw "Could not determine the WSL IPv4 address"
-    }
-
-    $ipAddress = $wslIp
-    Write-Output "WSL address: $ipAddress"
 
     if ($enableDtc) {
         # The container's DTC puts the container's hostname in its "whereabouts" blob. The Windows
@@ -342,8 +279,8 @@ elseif ($runnerOs -eq "Windows") {
         $hostsPath = "$Env:SystemRoot\System32\drivers\etc\hosts"
         $hostsMarker = "sqlserver"
         if (-not (Get-Content $hostsPath -ErrorAction SilentlyContinue | Select-String $hostsMarker)) {
-            Write-Output "Adding hosts entry: $wslIp sqlserver"
-            Add-Content -Path $hostsPath -Value "$wslIp sqlserver"
+            Write-Output "Adding hosts entry: $ipAddress sqlserver"
+            Add-Content -Path $hostsPath -Value "$ipAddress sqlserver"
         }
     }
 
@@ -385,7 +322,7 @@ elseif ($runnerOs -eq "Windows") {
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to start SQL Server container in WSL"
     }
-    & wsl.exe --distribution $wslDistribution -- docker ps --filter "name=$ContainerName"
+    Invoke-Wsl -Distribution $wslDistribution -Command "docker ps --filter name=$ContainerName"
     Write-Output "::endgroup::"
 
     if ($enableFts) {
@@ -403,7 +340,7 @@ elseif ($runnerOs -eq "Windows") {
         Write-Output "::endgroup::"
 
         Write-Output "Starting SQL Server process..."
-        & wsl.exe --distribution $wslDistribution -- docker exec -d $ContainerName /opt/mssql/bin/sqlservr
+        Invoke-Wsl -Distribution $wslDistribution -CheckExitCode -Command "docker exec -d $ContainerName /opt/mssql/bin/sqlservr"
     }
 
     # The Windows runner ships a native sqlcmd (MSSQL.CMDLnUtils). Wrap it so the self-signed

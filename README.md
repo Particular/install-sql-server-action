@@ -4,12 +4,18 @@ This action installs and runs SQL Server for a GitHub Actions workflow. Also [ad
 
 1. Runs SQL Server in a Linux Docker container on every platform.
   * On Linux, the container runs directly via Docker using the `mcr.microsoft.com/mssql/server:2022-latest` image.
-  * On Windows, the Linux container runs inside WSL2 (the action installs and starts Docker inside the WSL distribution).
+  * On Windows, the Linux container runs inside WSL2 provisioned by [setup-wsl-action](https://github.com/Particular/setup-wsl-action) — run it first, see [Prerequisites](#prerequisites).
   * Sets collation to case sensitive `SQL_Latin1_General_CP1_CS_AS` note SQL Azure is insensitive `CI_AS`
 1. Creates environment variables for a connection string and for `sqlcmd`.
 1. Waits for the SQL instance to be accessible.
 1. Creates a default database catalog.
 1. Tears the container down in a post step (see [Cleanup](#cleanup)).
+
+## Prerequisites
+
+This action does **not** provision WSL or Docker itself. On **Windows** runners it requires [setup-wsl-action](https://github.com/Particular/setup-wsl-action) to run **first** in the same job — that action provisions WSL2 + Docker, keeps the instance alive, and exports the `WSL_DISTRIBUTION`, `WSL_IP`, and `WSL_TOOLS_MODULE_PATH` environment variables this action relies on. On **Linux** runners setup-wsl-action is a no-op but should still be included so the workflow is uniform.
+
+If setup-wsl-action has not run, the action fails fast with a clear error.
 
 ## Usage
 
@@ -17,12 +23,16 @@ Install SQL Server 2022 with a default database of `nservicebus` and put the con
 
 ```yaml
 steps:
+  - name: Setup WSL
+    uses: Particular/setup-wsl-action@v1
   - name: Install SQL Server
     uses: Particular/install-sql-server-action@v1.5.0 # Check if this is the latest version at https://github.com/Particular/install-sql-server-action/tags
     with:
       connection-string-env-var: SQL_SERVER_CONNECTION_STRING
       catalog: nservicebus
 ```
+
+> Every example below assumes a `Setup WSL` step runs first (as shown in the first example); it is omitted for brevity.
 
 It is also possible to specify the SQl server major version to be installed
 
@@ -111,7 +121,7 @@ On hosted runners this cleanup is harmless — the runner VM is destroyed at the
 The generated connection string uses SQL authentication (`User Id=sa;Password=...;Encrypt=false;`):
 
 - On **Linux** the data source is `localhost` (`Server=localhost;...`).
-- On **Windows** the data source is the WSL2 VM IP address (`Server=<wsl-ip>;...`) so that the host can reach the container. The `WSL_DISTRIBUTION_OVERRIDE` and `WSL_MEMORY_OVERRIDE` environment variables can be set to override the distribution name (default `Debian`) and the `.wslconfig` memory limit (default `4GB`) respectively.
+- On **Windows** the data source is the WSL2 VM IP address (`Server=<wsl-ip>;...`) so that the host can reach the container. The address comes from the `WSL_IP` environment variable set by setup-wsl-action.
 
 ## Using `sqlcmd`
 
@@ -172,3 +182,5 @@ To run setup.ps1 / cleanup.ps1 directly during local debugging, set the same `IN
 pwsh -File setup.ps1 -ContainerName sqlserver -ConnectionStringName SQL_SERVER_CONNECTION_STRING -Catalog nservicebus
 pwsh -File cleanup.ps1 -ContainerName sqlserver
 ```
+
+> Running `setup.ps1`/`cleanup.ps1` directly on Windows requires `WSL_TOOLS_MODULE_PATH` to point at setup-wsl-action's `WslTools` module (set it by running setup-wsl-action first).
