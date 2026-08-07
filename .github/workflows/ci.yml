@@ -31,7 +31,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
       - name: Setup WSL
-        uses: Particular/setup-wsl-action@7379e61a7d51f5b69b57156a98146b6938f0f5c2
+        uses: Particular/setup-wsl-action@v1.0.0
       - name: Run
         uses: ./
         with:
@@ -69,7 +69,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
       - name: Setup WSL
-        uses: Particular/setup-wsl-action@7379e61a7d51f5b69b57156a98146b6938f0f5c2
+        uses: Particular/setup-wsl-action@v1.0.0
       - name: Run with FTS
         uses: ./
         with:
@@ -110,7 +110,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
       - name: Setup WSL
-        uses: Particular/setup-wsl-action@7379e61a7d51f5b69b57156a98146b6938f0f5c2
+        uses: Particular/setup-wsl-action@v1.0.0
       - name: Run with distributed transactions
         uses: ./
         with:
