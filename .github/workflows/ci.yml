@@ -166,7 +166,7 @@ jobs:
           echo $result
       - name: Setup .NET SDK
         if: runner.os == 'Windows'
-        uses: actions/setup-dotnet@v6.0.0
+        uses: actions/setup-dotnet@v6.1.0
         with:
           dotnet-version: 10.0.x
       - name: Run DTC functional test
